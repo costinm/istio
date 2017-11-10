@@ -1,10 +1,10 @@
 steps:
-- name: 'gcr.io/istio-io/istio-builder:0.3.2'
-  args: ['make', 'docker', "ISTIO_TAGS=git_latest"]
+- name: 'gcr.io/istio-testing/istio-builder:latest'
+  args: ['make', 'docker', "ISTIO_TAGS=git_latest", "HUB=gcr.io/istio-costin"]
 images:
 - 'gcr.io/$PROJECT_ID/mixer:git_latest'
 #- 'gcr.io/$PROJECT_ID/pilot:git_latest'
-- 'gcr.io/$PROJECT_ID/proxy_debug:git_latest'
+#- 'gcr.io/$PROJECT_ID/proxy_debug:git_latest'
 #- 'gcr.io/$PROJECT_ID/proxy_init:git_latest'
 #- 'gcr.io/$PROJECT_ID/istio-ca:git_latest'
 timeout: 1800s
