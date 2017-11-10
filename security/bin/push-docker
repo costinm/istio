@@ -8,16 +8,10 @@
 #  -i "init,init_debug,app,app_debug,runtime,runtime_debug"
 set -ex
 
+export IMAGES='istio-ca'
+
 BAZEL_STARTUP_ARGS=${BAZEL_STARTUP_ARGS:-}
 BAZEL_ARGS=${BAZEL_ARGS:-}
-
-IMAGES='istio-ca'
-
-while getopts :i:: arg; do
-  case ${arg} in
-    i) IMAGES="${OPTARG}";;
-  esac
-done
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source ${ROOT}/../bin/docker_lib.sh

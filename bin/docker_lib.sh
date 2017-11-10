@@ -19,11 +19,13 @@ function usage() {
 }
 
 function docker_push() {
-  local im="${1}"
-  if [[ "${im}" =~ ^gcr\.io ]]; then
-    gcloud docker -- push ${im}
-  else
-    docker push ${im}
+  if [ "${BUILD_ONLY}" != "true" ]; then
+    local im="${1}"
+    if [[ "${im}" =~ ^gcr\.io ]]; then
+      gcloud docker -- push ${im}
+    else
+      docker push ${im}
+    fi
   fi
 }
 
@@ -43,10 +45,10 @@ function tag_and_push() {
   done
 }
 
-HUBS="gcr.io/istio-testing"
+HUBS=${ISTIO_HUB:-"gcr.io/istio-testing"}
 local_tag=$(whoami)_$(date +%y%m%d_%H%M%S)
-TAGS="${local_tag}"
-BUILD_ONLY="false"
+TAGS=${ISTIO_TAGS:-"${local_tag}"}
+BUILD_ONLY=${BUILD_ONLY:-"false"}
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -54,6 +56,7 @@ while [[ $# -gt 0 ]]; do
         -t) TAGS="$2"; shift ;;
         -hub) HUBS="$2"; shift ;;
         -h) HUBS="$2"; shift ;;
+        -i) IMAGES="${OPTARG}"; shift;;
         -build-only) BUILD_ONLY="true";;
         -b) BUILD_ONLY="true";;
         -help) usage;;
