@@ -1,5 +1,5 @@
 steps:
-- name: 'gcr.io/istio-io/istio-builder:0.1'
+- name: 'gcr.io/istio-io/istio-builder:0.3.2'
   args: ['make', 'docker', "ISTIO_TAGS=git_latest"]
 - name: gcr.io/cloud-builders/docker
   args: ['tag', 'istio/docker:mixer', 'gcr.io/$PROJECT_ID/mixer:$BUILD_ID']
