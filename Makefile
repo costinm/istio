@@ -42,13 +42,13 @@ check:
 	echo 'To be added'
 
 build: setup
-	bazel $(BAZEL_STARTUP_ARGS) build $(BAZEL_BUILD_ARGS) //...
+	bazel $(BAZEL_STARTUP_ARGS) build $(BAZEL_BUILD_ARGS) //broker/... //devel/... //mixer/... //pilot/... //security/...
 
 clean:
 	@bazel clean
 
 test: setup
-	bazel $(BAZEL_STARTUP_ARGS) test $(BAZEL_TEST_ARGS) //...
+	bazel $(BAZEL_STARTUP_ARGS) test $(BAZEL_TEST_ARGS)  //broker/... //devel/... //mixer/... //pilot/... //security/...
 
 docker:
 	$(TOP)/security/bin/push-docker ${hub} ${tag} -build-only
