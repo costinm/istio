@@ -44,6 +44,9 @@ check:
 build: setup
 	bazel $(BAZEL_STARTUP_ARGS) build $(BAZEL_BUILD_ARGS) //broker/... //devel/... //mixer/... //pilot/... //security/...
 
+fmt:
+	bin/fmt.sh
+
 clean:
 	@bazel clean
 
