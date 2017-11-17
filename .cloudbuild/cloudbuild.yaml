@@ -1,6 +1,6 @@
 steps:
 - name: 'gcr.io/istio-testing/istio-builder:latest'
-  args: ['make', 'docker', "ISTIO_TAGS=git_latest", "HUB=gcr.io/istio-costin"]
+  args: ['make', 'docker', "ISTIO_TAGS=git_latest", "HUB=gcr.io/$PROJECT_ID"]
 images:
 - 'gcr.io/$PROJECT_ID/mixer:git_latest'
 #- 'gcr.io/$PROJECT_ID/pilot:git_latest'

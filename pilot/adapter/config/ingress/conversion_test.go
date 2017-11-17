@@ -80,6 +80,8 @@ func TestIsRegularExpression(t *testing.T) {
 		{"/api/.*/resource", true},
 		{"/api/v[1-9]/resource", true},
 		{"/api/.*/.*", true},
+		{"/.api/v1", true},
+		{"/\\.api/v1", false},
 	}
 
 	for _, c := range cases {
