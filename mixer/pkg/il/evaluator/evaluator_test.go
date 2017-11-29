@@ -53,7 +53,7 @@ func testWithILEvaluator(test ilt.TestInfo, t *testing.T) {
 	}
 
 	evaluator := initEvaluator(t, *config)
-	bag := &ilt.FakeBag{Attrs: test.I}
+	bag := ilt.NewFakeBag(test.I)
 
 	r, err := evaluator.Eval(test.E, bag)
 	if test.Err != "" || test.CompileErr != "" {
@@ -160,11 +160,11 @@ func TestConcurrent(t *testing.T) {
 
 	for i := 0; i < maxNum; i++ {
 		v := randString(6)
-		bags = append(bags, &ilt.FakeBag{
-			Attrs: map[string]interface{}{
+		bags = append(bags, ilt.NewFakeBag(
+			map[string]interface{}{
 				"attr": v,
 			},
-		})
+		))
 	}
 
 	expression := fmt.Sprintf("attr == \"%s\"", randString(16))
@@ -213,14 +213,6 @@ func TestEvalType_WrongType(t *testing.T) {
 	_, err := e.EvalType("boo", e.getAttrContext().finder)
 	if err == nil {
 		t.Fatal("Was expecting an error")
-	}
-}
-
-func TestAssertType(t *testing.T) {
-	e := initEvaluator(t, configBool)
-	err := e.AssertType("attr", e.getAttrContext().finder, pbv.BOOL)
-	if err != nil {
-		t.Fatalf("error: %s", err)
 	}
 }
 
@@ -318,6 +310,29 @@ func Test_Stress(t *testing.T) {
 	}
 }
 
+func Test_TypeChecker_Uninitialized(t *testing.T) {
+	e, err := NewILEvaluator(10, maxStringTableSizeForPurge)
+	if err != nil {
+		t.Fatalf("error: %s", err)
+	}
+
+	aType, err := e.EvalType("attr", descriptor.NewFinder(&configString))
+	if err != nil {
+		t.Fatalf("error: %s", err)
+	}
+	if aType != pbv.STRING {
+		t.Fatalf("attr should have been a string: %s", aType)
+	}
+
+	aType, err = e.EvalType("attr", descriptor.NewFinder(&configInt))
+	if err != nil {
+		t.Fatalf("error: %s", err)
+	}
+	if aType != pbv.INT64 {
+		t.Fatalf("attr should have been an int: %s", aType)
+	}
+}
+
 func generateRandomStr(r *rand.Rand) string {
 	size := r.Intn(20) + 1
 	bytes := make([]byte, size)
@@ -334,7 +349,7 @@ func initBag(attrValue interface{}) attribute.Bag {
 	attrs := make(map[string]interface{})
 	attrs["attr"] = attrValue
 
-	return &ilt.FakeBag{Attrs: attrs}
+	return ilt.NewFakeBag(attrs)
 }
 
 func initEvaluator(t *testing.T, config pb.GlobalConfig) *IL {

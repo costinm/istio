@@ -14,6 +14,7 @@ function usage() {
   echo "$0 \
     -h,-hub <docker image repository> \
     -t,-tag <comma separated list of docker image TAGS> \
+    -o,-output-tar <directory to copy image tar> \
     -b,-build-only <docker image repository>"
   exit 1
 }
@@ -42,6 +43,10 @@ function tag_and_push() {
         fi
       done
     done
+    if [[ "${OUTPUT_DIR}" != "" ]]; then
+      mkdir -p "${OUTPUT_DIR}/docker"
+      docker save -o "${OUTPUT_DIR}/docker/${IMAGE}.tar" "${IMAGE}"
+    fi
   done
 }
 
@@ -49,6 +54,7 @@ HUBS=${ISTIO_HUB:-"gcr.io/istio-testing"}
 local_tag=$(whoami)_$(date +%y%m%d_%H%M%S)
 TAGS=${ISTIO_TAGS:-"${local_tag}"}
 BUILD_ONLY=${BUILD_ONLY:-"false"}
+OUTPUT_DIR=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -57,6 +63,8 @@ while [[ $# -gt 0 ]]; do
         -hub) HUBS="$2"; shift ;;
         -h) HUBS="$2"; shift ;;
         -i) IMAGES="${OPTARG}"; shift;;
+        -output-tar) OUTPUT_DIR="$2"; shift ;;
+        -o) OUTPUT_DIR="$2"; shift ;;
         -build-only) BUILD_ONLY="true";;
         -b) BUILD_ONLY="true";;
         -help) usage;;

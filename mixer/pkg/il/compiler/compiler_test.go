@@ -45,7 +45,7 @@ func TestCompile(t *testing.T) {
 			}
 			finder := descriptor.NewFinder(conf)
 
-			result, err := Compile(test.E, finder, expr.FuncMap())
+			result, err := Compile(test.E, finder, expr.FuncMap(runtime.ExternFunctionMetadata))
 
 			if err != nil {
 				if err.Error() != test.CompileErr {
@@ -76,10 +76,10 @@ func TestCompile(t *testing.T) {
 			if input == nil {
 				input = map[string]interface{}{}
 			}
-			b := ilt.FakeBag{Attrs: input}
+			b := ilt.NewFakeBag(input)
 
 			i := interpreter.New(result.Program, runtime.Externs)
-			v, err := i.Eval("eval", &b)
+			v, err := i.Eval("eval", b)
 			if err != nil {
 				if test.Err != err.Error() {
 					tt.Fatalf("expected error not found: E:'%v', A:'%v'", test.Err, err)
