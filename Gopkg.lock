@@ -23,7 +23,7 @@
     "api",
     "testhelpers"
   ]
-  revision = "fb28eb02defe910369ffcd34a6f5c9235d983cf0"
+  revision = "1e7e324f8366ded261140272c9e44d0ee681bdbf"
 
 [[projects]]
   name = "github.com/Azure/go-autorest"
@@ -1301,7 +1301,7 @@
     "rbac/v1alpha1",
     "routing/v1alpha1"
   ]
-  revision = "7d7710a0533b543527897badc342c50eb169c83e"
+  revision = "bcb444565a2f6485083f497c6d539cfc6d75c008"
 
 [[projects]]
   name = "istio.io/fortio"
