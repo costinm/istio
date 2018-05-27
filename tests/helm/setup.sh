@@ -5,8 +5,8 @@ function testIstioSystem() {
    helm -n istio-system template \
     --values tests/helm/values-istio-test.yaml \
     --set global.refreshInterval=30s \
-    --set global.tag=costin-dev \
-    --set global.hub=docker.io/costinm \
+    --set global.tag=$TAG \
+    --set global.hub=$HUB \
     install/kubernetes/helm/istio  | \
         kubectl apply -n istio-system -f -
    popd

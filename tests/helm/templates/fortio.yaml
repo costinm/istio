@@ -35,7 +35,7 @@ spec:
   - port: 8079
     name: grpc-ping
   selector:
-    app: fortio
+    app: fortiosplit
 ---
 # Headless version
 apiVersion: v1
