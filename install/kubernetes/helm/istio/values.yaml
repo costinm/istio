@@ -219,11 +219,8 @@ egressgateway:
 #
 # sidecar-injector webhook configuration
 #
-sidecar-injector:
+sidecarInjectorWebhook:
   enabled: true
-  enableCoreDump: false
-  serviceAccountName: default # used only if RBAC is not enabled
-  replicaCount: 1
   image: sidecar_injector
 
 
