@@ -31,8 +31,6 @@ import (
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pilot/pkg/serviceregistry/kube"
 	"istio.io/istio/pkg/log"
-	"sync"
-	"sync/atomic"
 )
 
 // controller is a collection of synchronized resource watchers.

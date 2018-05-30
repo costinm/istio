@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"sort"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -31,7 +32,6 @@ import (
 
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pkg/log"
-	"sort"
 )
 
 const (
@@ -505,7 +505,7 @@ func (c *Controller) GetProxyServiceInstances(proxy *model.Proxy) ([]*model.Serv
 							AvailabilityZone: az,
 							ServiceAccount:   sa,
 						}
-						out = append(out,si)
+						out = append(out, si)
 						key := fmt.Sprint("%s:%d", svc.Hostname, port.Port)
 						svcPortMap[key] = append(svcPortMap[key], si)
 					}

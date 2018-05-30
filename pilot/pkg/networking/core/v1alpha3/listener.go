@@ -106,7 +106,7 @@ func (configgen *ConfigGeneratorImpl) BuildListeners(env model.Environment, node
 func (configgen *ConfigGeneratorImpl) buildSidecarListeners(env model.Environment, node model.Proxy) ([]*xdsapi.Listener, error) {
 
 	mesh := env.Mesh
-	managementPorts := env.ManagementPorts(node.IPAddress)
+	// managementPorts := env.ManagementPorts(node.IPAddress)
 
 	proxyInstances, err := env.GetProxyServiceInstances(&node)
 	if err != nil {
@@ -130,20 +130,20 @@ func (configgen *ConfigGeneratorImpl) buildSidecarListeners(env model.Environmen
 		listeners = append(listeners, inbound...)
 		listeners = append(listeners, outbound...)
 
-		mgmtListeners := buildMgmtPortListeners(managementPorts, node.IPAddress)
-		// If management listener port and service port are same, bad things happen
-		// when running in kubernetes, as the probes stop responding. So, append
-		// non overlapping listeners only.
-		for i := range mgmtListeners {
-			m := mgmtListeners[i]
-			l := util.GetByAddress(listeners, m.Address.String())
-			if l != nil {
-				log.Warnf("Omitting listener for management address %s (%s) due to collision with service listener %s (%s)",
-					m.Name, m.Address, l.Name, l.Address)
-				continue
-			}
-			listeners = append(listeners, m)
-		}
+		//mgmtListeners := buildMgmtPortListeners(managementPorts, node.IPAddress)
+		//// If management listener port and service port are same, bad things happen
+		//// when running in kubernetes, as the probes stop responding. So, append
+		//// non overlapping listeners only.
+		//for i := range mgmtListeners {
+		//	m := mgmtListeners[i]
+		//	l := util.GetByAddress(listeners, m.Address.String())
+		//	if l != nil {
+		//		log.Warnf("Omitting listener for management address %s (%s) due to collision with service listener %s (%s)",
+		//			m.Name, m.Address, l.Name, l.Address)
+		//		continue
+		//	}
+		//	listeners = append(listeners, m)
+		//}
 
 		// We need a dummy filter to fill in the filter stack for orig_dst listener
 		// TODO: Move to Listener filters and set up original dst filter there.

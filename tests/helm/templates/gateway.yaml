@@ -156,8 +156,16 @@ spec:
   - route:
     - destination:
         host: fortiov1.test.svc.cluster.local
+        subset: v1
         port:
           number: 8080
+      weight: 10
+    - destination:
+        host: fortiov1.test.svc.cluster.local
+        subset: v2
+        port:
+          number: 8080
+      weight: 90
 
 
 ---
