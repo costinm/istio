@@ -141,6 +141,7 @@ ingressgateway:
   serviceAccountName: istio-ingressgateway-service-account
   autoscaleMin: 1
   autoscaleMax: 1
+  replicaCount: 1
   resources: {}
 # limits:
 #  cpu: 100m

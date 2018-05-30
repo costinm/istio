@@ -1,12 +1,6 @@
-# Single version
 apiVersion: networking.istio.io/v1alpha3
 kind: DestinationRule
 metadata:
-  name: dstfortio
+  name: fortiov1
 spec:
-  host: dstfortio
-  subsets:
-    - name: v1
-      labels:
-        version: v1
----
+  host: fortiov1

@@ -7,6 +7,10 @@ function testIstioSystem() {
     --set global.refreshInterval=30s \
     --set global.tag=$TAG \
     --set global.hub=$HUB \
+    --set global.imagePullPolicy=Always \
+    --set ingressgateway.replicaCount=2 \
+    --set mixer.replicaCount=2 \
+    --set pilot.replicaCount=2 \
     install/kubernetes/helm/istio  | \
         kubectl apply -n istio-system -f -
    popd
