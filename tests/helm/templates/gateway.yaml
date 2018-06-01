@@ -22,6 +22,12 @@ spec:
     - "bookinfo.{{ .Values.domain }}"
     - "httpbin.{{ .Values.domain }}"
   - port:
+      number: 5204
+      protocol: TCP
+      name: tcp-tls
+    hosts:
+    - "*"
+  - port:
       number: 5203
       protocol: TCP
       name: tcp-iperf
@@ -215,10 +221,50 @@ spec:
   gateways:
   - istio08-gateway
   tcp:
-  - route:
+  - match:
+    - port: 5203
+    route:
     - destination:
         host: iperf3.test.svc.cluster.local
         port:
-          number: 5202
+          number: 5203
 
 ---
+
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: iperf-tls
+spec:
+  hosts:
+  - "iperf.{{ .Values.domain }}"
+  gateways:
+  - istio08-gateway
+  tcp:
+  - match:
+    - port: 5204
+    route:
+    - destination:
+        host: iperf3-tls.test.svc.cluster.local
+        port:
+          number: 5204
+
+---
+
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: iperf-raw
+spec:
+  hosts:
+  - "iperf.{{ .Values.domain }}"
+  gateways:
+  - istio08-gateway
+  tcp:
+  - match:
+    - port: 5202
+    route:
+    - destination:
+        host: iperf3-raw.test.svc.cluster.local
+        port:
+          number: 5202

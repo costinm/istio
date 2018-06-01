@@ -1,3 +1,9 @@
+# This file creates load on pilot:
+# - ServiceEntry and Service result in Cluster objects
+# - VirtualService byon-N.byon.istio.webinf.info create load on the route table
+
+# Construct N VirtualServices with an arbitrary (generated) name.
+# The name in this config is setup to resolve to a real IP address
 {{ $v := int .Values.testAServices }}
 {{ range $i, $e := until $v }}
 ---
@@ -18,6 +24,9 @@ spec:
 ---
 {{ end }}
 
+# Construct Service with Endpoints (of 'old mesh expansion' type), to create
+# load of Service type.
+# Note that in 0.8 http services don't create additional Listeners !!!
 {{ $v1 := int .Values.testVMServices }}
 {{ range $i, $e := until $v1 }}
 
