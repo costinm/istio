@@ -17,7 +17,7 @@ spec:
       - type: Resource
         resource:
           name: cpu
-          targetAverageUtilization: 55
+          targetAverageUtilization: 80
 ---
 {{- end }}
 {{- end }}

@@ -1,0 +1,37 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: ServiceEntry
+metadata:
+  name: fake-ingress
+spec:
+   hosts:
+   - ingress.istio-system.istio.io
+   ports:
+   - number: 80
+     name: http
+     protocol: HTTP
+   resolution: STATIC
+   endpoints:
+    - address: 10.10.10.11
+      ports:
+        http: 80
+      labels:
+        istio: ingress
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: ServiceEntry
+metadata:
+  name: fake-ingressgateway
+spec:
+   hosts:
+   - ingress.istio-system.istio.io
+   ports:
+   - number: 80
+     name: http
+     protocol: HTTP
+   resolution: STATIC
+   endpoints:
+    - address: 10.10.10.10
+      ports:
+        http: 80
+      labels:
+        istio: ingressgateway

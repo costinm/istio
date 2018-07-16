@@ -6,15 +6,19 @@ global:
   tag: nightly-release-0.8
   meshExpansion: true
   meshExpansionILB: true
+  refreshInterval: 30s
+  imagePullPolicy: Always
+  configValidation: false
+
   proxy_init:
     image: costinm/proxy_init:tproxy
 
   proxy:
-    image: proxyv2
+    accessLogFile: ""
     resources:
       requests:
         cpu: 900m
-        memory: 1024Mi
+        memory: 256Mi
 
 gateways:
   istio-ilbgateway:
@@ -23,6 +27,16 @@ gateways:
   istio-ingressgateway:
     meshExpansion: true
     enabled: true
+    secretVolumes:
+    - name: istio-ingressgateway-certs
+      secretName: istio-ingressgateway-certs
+      mountPath: /etc/istio/ingressgateway-certs
+    - name: istio-ingressgateway-certs2
+      secretName: istio-ingressgateway-certs2
+      mountPath: /etc/istio/ingressgateway-certs2
+    - name: istio-ingressgateway-certs-fortionoistio
+      secretName: istio-ingressgateway-certs-fortionoistio
+      mountPath: /etc/istio/ingressgateway-certs-fortionoistio
     labels:
       istio: ingressgateway
       ver: ingress10
@@ -67,6 +81,10 @@ pilot:
   replicaCount: 1
   # Override for 0.8 upgrade
   #image: costinm/pilot:costin-dev
+  resources:
+    requests:
+      cpu: 2800m
+      memory: 2G
 
 ingress:
   enabled: true
@@ -81,9 +99,20 @@ grafana:
   enabled: true
   #image: gcr.io/istio-release/grafana:release-1.0-20180710-09-15
 
+mixer:
+#  image: gcr.io/istio-release/mixer:release-1.0-20180710-09-15
+  resources:
+    requests:
+      cpu: 2800m
+      memory: 2G
 
 zipkin:
   enabled: true
+
+tracing:
+  enabled: false
+  jaeger:
+    enabled: true
 
 servicegraph:
   enabled: true
@@ -96,3 +125,10 @@ kiali:
 
 certmanager:
   enabled: true
+  email: costin@webinf.info
+  commonName: ingress.v10.istio.webinf.info
+  certificates:
+    - "ingress.v10.istio.webinf.info"
+  #commonName: fortiotls.v10.istio.webinf.info
+  #certificates:
+  #  - "fortiotls.v10.istio.webinf.info"
