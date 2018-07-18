@@ -16,14 +16,13 @@ package ingress
 
 import (
 	"fmt"
+	"path"
 	"strconv"
 	"strings"
 
 	multierror "github.com/hashicorp/go-multierror"
 	"k8s.io/api/extensions/v1beta1"
 	"k8s.io/apimachinery/pkg/util/intstr"
-
-	"path"
 
 	meshconfig "istio.io/api/mesh/v1alpha1"
 	networking "istio.io/api/networking/v1alpha3"

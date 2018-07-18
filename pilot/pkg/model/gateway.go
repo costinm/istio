@@ -125,7 +125,7 @@ func MergeGateways(gateways ...Config) *MergedGateway {
 		}
 	}
 
-	// Concatenate both sets of servershttps://github.com/istio/istio/pull/7116
+	// Concatenate both sets of servers
 	for p, v := range tlsServers {
 		servers[p] = v
 	}

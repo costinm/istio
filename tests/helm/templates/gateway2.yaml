@@ -15,7 +15,7 @@ spec:
     tls:
       mode: SIMPLE
       serverCertificate: /etc/istio/ingressgateway-certs-fortiotls/tls.crt
-      privateKey: /etc/istio/ingressgateway-certs2/tls.key
+      privateKey: /etc/istio/ingressgateway-certs-fortiotls/tls.key
     hosts:
     - "fortiotls.{{ .Values.domain }}"
   - port:

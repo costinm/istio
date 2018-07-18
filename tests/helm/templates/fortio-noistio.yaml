@@ -81,7 +81,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: fortionoistio
+  name: fortionoistio1
 spec:
   ports:
   - port: 8080

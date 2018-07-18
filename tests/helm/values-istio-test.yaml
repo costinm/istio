@@ -9,7 +9,7 @@ global:
   refreshInterval: 30s
   imagePullPolicy: Always
   configValidation: false
-
+  ingressSelector: ingressgateway
   proxy_init:
     image: costinm/proxy_init:tproxy
 
@@ -31,9 +31,9 @@ gateways:
     - name: istio-ingressgateway-certs
       secretName: istio-ingressgateway-certs
       mountPath: /etc/istio/ingressgateway-certs
-    - name: istio-ingressgateway-certs2
-      secretName: istio-ingressgateway-certs2
-      mountPath: /etc/istio/ingressgateway-certs2
+    - name: istio-ingressgateway-certs-fortiotls
+      secretName: istio-ingressgateway-certs-fortiotls
+      mountPath: /etc/istio/ingressgateway-certs-fortiotls
     - name: istio-ingressgateway-certs-fortionoistio
       secretName: istio-ingressgateway-certs-fortionoistio
       mountPath: /etc/istio/ingressgateway-certs-fortionoistio
@@ -46,10 +46,10 @@ gateways:
     autoscaleMax: 4
     resources:
       limits:
-        cpu: 4000m
+        cpu: 3000m
         memory: 512Mi
       requests:
-        cpu: 4000m
+        cpu: 2000m
         memory: 512Mi
     type: LoadBalancer #change to NodePort, ClusterIP or LoadBalancer if need be
     ports:
@@ -87,7 +87,7 @@ pilot:
       memory: 2G
 
 ingress:
-  enabled: true
+  enabled: false
 
 prometheus:
   enabled: true

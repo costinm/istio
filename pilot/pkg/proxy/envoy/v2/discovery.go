@@ -143,7 +143,9 @@ func (s *DiscoveryServer) periodicRefreshMetrics() {
 	defer ticker.Stop()
 	for range ticker.C {
 		push := s.env.PushStatus
-		model.LastPushStatus = push
+		if push.End != timeZero {
+			model.LastPushStatus = push
+		}
 		push.UpdateMetrics()
 		// TODO: env to customize
 		if time.Since(push.Start) > 30*time.Second {
