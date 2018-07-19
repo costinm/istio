@@ -2,6 +2,8 @@ apiVersion: apiextensions.k8s.io/v1beta1
 kind: CustomResourceDefinition
 metadata:
   name: virtualservices.networking.istio.io
+  annotations:
+    "helm.sh/hook": "pre-install"
   labels:
     app: istio-pilot
 spec:
@@ -21,6 +23,8 @@ apiVersion: apiextensions.k8s.io/v1beta1
 kind: CustomResourceDefinition
 metadata:
   name: destinationrules.networking.istio.io
+  annotations:
+    "helm.sh/hook": "pre-install"
   labels:
     app: istio-pilot
 spec:
@@ -40,6 +44,8 @@ apiVersion: apiextensions.k8s.io/v1beta1
 kind: CustomResourceDefinition
 metadata:
   name: serviceentries.networking.istio.io
+  annotations:
+    "helm.sh/hook": "pre-install"
   labels:
     app: istio-pilot
 spec:
@@ -59,6 +65,8 @@ apiVersion: apiextensions.k8s.io/v1beta1
 kind: CustomResourceDefinition
 metadata:
   name: gateways.networking.istio.io
+  annotations:
+    "helm.sh/hook": "pre-install"
   labels:
     app: istio-pilot
 spec:
@@ -76,6 +84,8 @@ spec:
 kind: CustomResourceDefinition
 apiVersion: apiextensions.k8s.io/v1beta1
 metadata:
+  annotations:
+    "helm.sh/hook": "pre-install"
   name: policies.authentication.istio.io
 spec:
   group: authentication.istio.io
@@ -92,6 +102,8 @@ spec:
 kind: CustomResourceDefinition
 apiVersion: apiextensions.k8s.io/v1beta1
 metadata:
+  annotations:
+    "helm.sh/hook": "pre-install"
   name: meshpolicies.authentication.istio.io
 spec:
   group: authentication.istio.io
@@ -109,6 +121,8 @@ spec:
 kind: CustomResourceDefinition
 apiVersion: apiextensions.k8s.io/v1beta1
 metadata:
+  annotations:
+    "helm.sh/hook": "pre-install"
   name: httpapispecbindings.config.istio.io
 spec:
   group: config.istio.io
@@ -125,6 +139,8 @@ spec:
 kind: CustomResourceDefinition
 apiVersion: apiextensions.k8s.io/v1beta1
 metadata:
+  annotations:
+    "helm.sh/hook": "pre-install"
   name: httpapispecs.config.istio.io
 spec:
   group: config.istio.io
@@ -141,6 +157,8 @@ spec:
 kind: CustomResourceDefinition
 apiVersion: apiextensions.k8s.io/v1beta1
 metadata:
+  annotations:
+    "helm.sh/hook": "pre-install"
   name: quotaspecbindings.config.istio.io
 spec:
   group: config.istio.io
@@ -157,6 +175,8 @@ spec:
 kind: CustomResourceDefinition
 apiVersion: apiextensions.k8s.io/v1beta1
 metadata:
+  annotations:
+    "helm.sh/hook": "pre-install"
   name: quotaspecs.config.istio.io
 spec:
   group: config.istio.io
@@ -175,6 +195,8 @@ apiVersion: apiextensions.k8s.io/v1beta1
 kind: CustomResourceDefinition
 metadata:
   name: envoyfilters.networking.istio.io
+  annotations:
+    "helm.sh/hook": "pre-install"
   labels:
     app: istio-pilot
 spec:

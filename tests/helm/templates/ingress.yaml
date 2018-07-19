@@ -48,7 +48,7 @@ metadata:
     kubernetes.io/ingress.class: istio
 spec:
   rules:
-  - host: fortio.{{ .Values.domain }}
+  - host: httpbin.{{ .Values.domain }}
     http:
       paths:
       - path: /lucky1
@@ -71,6 +71,10 @@ spec:
         backend:
           serviceName: c
           servicePort: 80
+      - path: .*
+        backend:
+          serviceName: httpbin.test.svc.cluster.local
+          servicePort: 8000
   - host: fortiotls.{{ .Values.domain }}
     http:
       paths:
