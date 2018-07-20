@@ -83,6 +83,8 @@ gateways:
 
 pilot:
   replicaCount: 1
+  sidecar: false
+  autoscaleMax: 1
   # Override for 0.8 upgrade
   #image: costinm/pilot:costin-dev
   resources:
