@@ -332,6 +332,7 @@ pilot:
   autoscaleMin: 1
   autoscaleMax: 5
   image: pilot
+  sidecar: false
   traceSampling: 100.0
 
 #

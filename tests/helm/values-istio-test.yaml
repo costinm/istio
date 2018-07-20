@@ -20,6 +20,9 @@ global:
         cpu: 900m
         memory: 256Mi
 
+ingress:
+  enabled: false
+
 gateways:
   istio-ilbgateway:
     enabled: true
@@ -42,14 +45,15 @@ gateways:
       ver: ingress10
       app: istio-ingressgateway
       name: gateway
-    autoscaleMin: 1
-    autoscaleMax: 4
+    replicas: 3
+    autoscaleMin: 3
+    autoscaleMax: 5
     resources:
       limits:
-        cpu: 3000m
+        cpu: 6000m
         memory: 512Mi
       requests:
-        cpu: 2000m
+        cpu: 4000m
         memory: 512Mi
     type: LoadBalancer #change to NodePort, ClusterIP or LoadBalancer if need be
     ports:

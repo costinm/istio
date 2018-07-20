@@ -71,9 +71,9 @@ spec:
         backend:
           serviceName: c
           servicePort: 80
-      - path: .*
+      - path: /.*
         backend:
-          serviceName: httpbin.test.svc.cluster.local
+          serviceName: httpbin
           servicePort: 8000
   - host: fortiotls.{{ .Values.domain }}
     http:
