@@ -24,7 +24,7 @@ spec:
         app: fortiomaster
         version: fortiomaster
       annotations:
-        sidecar.istio.io/proxyImage: istionightly/proxyv2:nightly-master
+        sidecar.istio.io/proxyImage: istionightly/proxyv2:nightly-release-1.0
     spec:
       containers:
       - name: echosrv

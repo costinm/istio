@@ -91,7 +91,6 @@ metadata:
     release: keel
     heritage: Tiller
 spec:
-  type: LoadBalancer
   ports:
     - port: 9300
       targetPort: 9300
