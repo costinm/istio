@@ -1,3 +1,8 @@
+# Apply this file to create 2 fake endpoints, one for ingress and one of ingressgateway.
+# You can run pilot in a debugger locally, and connect to pilot using the 2 fake IPs, and 
+# pilot will generate the ADS config. This avoids having to get the IP of a real ingress
+# and is easier to automate.
+
 apiVersion: networking.istio.io/v1alpha3
 kind: ServiceEntry
 metadata:

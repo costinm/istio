@@ -9,7 +9,7 @@ spec:
   servers:
   - port:
       number: 80
-      protocol: HTTP
+      protocol: HTTP2
       name: http
     hosts:
     - "*"
@@ -22,35 +22,6 @@ spec:
       mode: SIMPLE
       serverCertificate: /etc/istio/ingress-certs/tls.crt
       privateKey: /etc/istio/ingress-certs/tls.key
-    hosts:
-    - "*"
-{{ end }}
----
-
-apiVersion: networking.istio.io/v1alpha3
-kind: Gateway
-metadata:
-  name: ingressgateway
-spec:
-  selector:
-    istio: ingressgateway
-  servers:
-  - port:
-      number: 80
-      protocol: HTTP
-      name: http
-    hosts:
-    - "*"
-{{ if .Values.global.ingressHttps }}
-  - port:
-      number: 443
-      protocol: HTTPS
-      name: https-default
-    # The values here MUST match paths from 'secretVolumes' in values.yaml
-    tls:
-      mode: SIMPLE
-      serverCertificate: /etc/istio/ingressgateway-certs/tls.crt
-      privateKey: /etc/istio/ingressgateway-certs/tls.key
     hosts:
     - "*"
 {{ end }}

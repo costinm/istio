@@ -10,7 +10,6 @@ function testIstioSystem() {
     --values tests/helm/values-istio-test.yaml \
     install/kubernetes/helm/istio  | \
         kubectl apply -n istio-system -f -
-      #cat
    popd
 
 }
