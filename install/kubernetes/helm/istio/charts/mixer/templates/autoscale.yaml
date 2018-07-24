@@ -1,36 +1,24 @@
-{{- if .Values.autoscaleMin }}
+{{- range $key, $spec := .Values }}
+{{- if or (eq $key "istio-policy") (eq $key "istio-telemetry") }}
+{{- if and $spec.autoscaleEnabled $spec.autoscaleMin }}
 apiVersion: autoscaling/v2beta1
 kind: HorizontalPodAutoscaler
 metadata:
-    name: istio-telemetry
+    name: {{ $key }}
+    namespace: {{ $.Release.Namespace }}
 spec:
-    maxReplicas: {{ .Values.autoscaleMax }}
-    minReplicas: {{ .Values.autoscaleMin }}
+    maxReplicas: {{ $spec.autoscaleMax }}
+    minReplicas: {{ $spec.autoscaleMin }}
     scaleTargetRef:
       apiVersion: apps/v1beta1
       kind: Deployment
-      name: istio-telemetry
+      name: {{ $key }}
     metrics:
-      - type: Resource
-        resource:
-          name: cpu
-          targetAverageUtilization: 55
+    - type: Resource
+      resource:
+        name: cpu
+        targetAverageUtilization: {{ $spec.cpu.targetAverageUtilization }}
 ---
-apiVersion: autoscaling/v2beta1
-kind: HorizontalPodAutoscaler
-metadata:
-    name: istio-policy
-spec:
-    maxReplicas: {{ .Values.autoscaleMax }}
-    minReplicas: {{ .Values.autoscaleMin }}
-    scaleTargetRef:
-      apiVersion: apps/v1beta1
-      kind: Deployment
-      name: istio-policy
-    metrics:
-      - type: Resource
-        resource:
-          name: cpu
-          targetAverageUtilization: 55
----
+{{- end }}
+{{- end }}
 {{- end }}
