@@ -1,5 +1,5 @@
 # Creates a set number of ingress routes, to test ingress scalability.
-# Each ingress is translated to a VirtualService
+# Each ingress is translated to a fake VirtualService
 {{ $v := int .Values.loadTestIngress }}
 # {{ $v }}
 {{ range $i, $e := until $v }}
@@ -15,7 +15,7 @@ spec:
         paths:
           - path: /test/{{ $i }}/.*
             backend:
-              serviceName: a.test
+              serviceName: fortiosmall
               servicePort: 80
 ---
 {{ end }}

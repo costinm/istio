@@ -92,6 +92,8 @@ pilot:
     requests:
       cpu: 2800m
       memory: 2G
+  env:
+
 
 ingress:
   enabled: false

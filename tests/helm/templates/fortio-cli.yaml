@@ -6,7 +6,7 @@ kind: Deployment
 metadata:
   name: cli-fortio-tls
 spec:
-  replicas: 4
+  replicas: 8
   template:
     metadata:
       labels:
@@ -24,16 +24,16 @@ spec:
           - -t
           - "0"
           - -c
-          - "32"
+          - "64"
           - -qps
           - "{{ .Values.qps }}"
           - http://fortiotls.{{ .Values.domain }}/echo?size=5000
         resources:
           requests:
-            cpu: 800m
+            cpu: 200m
             memory: "1G"
           limits:
-            cpu: 1000m
+            cpu: 500m
             memory: "1G"
 ---
 apiVersion: apps/v1beta1
@@ -41,7 +41,7 @@ kind: Deployment
 metadata:
   name: fortio-cli-raw
 spec:
-  replicas: 4
+  replicas: 8
   template:
     metadata:
       labels:
@@ -59,16 +59,16 @@ spec:
           - -t
           - "0"
           - -c
-          - "32"
+          - "64"
           - -qps
           - "{{ .Values.qps }}"
           - http://fortionoistio.{{ .Values.domain }}/echo?size=5000
         resources:
           requests:
-            cpu: 800m
+            cpu: 200m
             memory: "1G"
           limits:
-            cpu: 1000m
+            cpu: 500m
             memory: "1G"
 ---
 apiVersion: apps/v1beta1

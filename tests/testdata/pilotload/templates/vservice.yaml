@@ -1,0 +1,19 @@
+{{ $v := int .Values.testAServices }}
+{{ range $i, $e := until $v }}
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: byon-{{ $i }}
+spec:
+  hosts:
+  - byon-{{- $i -}}.v10.istio.webinf.info
+  http:
+  - route:
+    - destination:
+        host: fortio.test.svc.cluster.local
+        port:
+          number: 8080
+
+---
+{{ end }}
