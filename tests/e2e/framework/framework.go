@@ -24,9 +24,6 @@ import (
 )
 
 var (
-	// Deprecated - use the SKIP_CLEANUP env variable (set by default
-	// in circle, can be set for local test env if minikube is reset).
-	// Use the env variable to be able to debug test failures.
 	skipCleanup = flag.Bool("skip_cleanup", false, "Debug, skip clean up")
 	// TestVM is true if in this test run user wants to test VM on istio
 	TestVM = flag.Bool("test_vm", false, "whether to test VM on istio")
