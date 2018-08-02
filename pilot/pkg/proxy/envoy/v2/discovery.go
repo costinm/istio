@@ -70,8 +70,8 @@ type DiscoveryServer struct {
 
 	// ConfigController provides readiness info (if initial sync is complete)
 	ConfigController model.ConfigStoreCache
-	
-        // The next fields are updated by v2 discovery, based on config change events (currently
+
+	// The next fields are updated by v2 discovery, based on config change events (currently
 	// the global invalidation). They are computed once - will not change. The new alpha3
 	// API should use this instead of directly accessing ServiceDiscovery or IstioConfigStore.
 	modelMutex      sync.RWMutex
