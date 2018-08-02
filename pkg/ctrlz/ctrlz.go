@@ -27,21 +27,24 @@
 package ctrlz
 
 import (
-	"fmt"
 	"html/template"
 	"net"
 	"net/http"
 	"os"
-	"time"
 
 	"github.com/gorilla/mux"
+
+	"sync"
+
+	"fmt"
+	"time"
 
 	"istio.io/istio/pkg/ctrlz/fw"
 	"istio.io/istio/pkg/ctrlz/topics"
 	"istio.io/istio/pkg/log"
 )
 
-var allTopics = []fw.Topic{
+var coreTopics = []fw.Topic{
 	topics.ScopeTopic(),
 	topics.MemTopic(),
 	topics.EnvTopic(),
@@ -49,6 +52,16 @@ var allTopics = []fw.Topic{
 	topics.ArgsTopic(),
 	topics.VersionTopic(),
 	topics.MetricsTopic(),
+}
+
+var allTopics []fw.Topic
+var topicMutex sync.Mutex
+var shutdown sync.WaitGroup
+
+var server = http.Server{
+	ReadTimeout:    10 * time.Second,
+	WriteTimeout:   10 * time.Second,
+	MaxHeaderBytes: 1 << 20,
 }
 
 func augmentLayout(layout *template.Template, page string) *template.Template {
@@ -87,7 +100,11 @@ type topic struct {
 }
 
 func getTopics() []topic {
-	topics := []topic{}
+	var topics []topic
+
+	topicMutex.Lock()
+	defer topicMutex.Unlock()
+
 	for _, t := range allTopics {
 		topics = append(topics, topic{Name: t.Title(), URL: "/" + t.Prefix() + "z/"})
 	}
@@ -95,16 +112,39 @@ func getTopics() []topic {
 	return topics
 }
 
+// RegisterTopic registers a new Control-Z topic for the current process.
+func RegisterTopic(t fw.Topic) {
+	topicMutex.Lock()
+	defer topicMutex.Unlock()
+
+	allTopics = append(allTopics, t)
+}
+
 // Run starts up the ControlZ listeners.
+//
+// ControlZ uses the set of standard core topics, the
+// supplied custom topics, as well as any topics registered
+// via the RegisterTopic function.
 func Run(o *Options, customTopics []fw.Topic) {
+	shutdown.Add(1)
+	defer shutdown.Done()
+
 	if o.Port == 0 {
 		// disabled
 		return
 	}
 
+	topicMutex.Lock()
+
+	for _, t := range coreTopics {
+		allTopics = append(allTopics, t)
+	}
+
 	for _, t := range customTopics {
 		allTopics = append(allTopics, t)
 	}
+
+	topicMutex.Unlock()
 
 	exec, _ := os.Executable()
 	instance := exec + " - " + getLocalIP()
@@ -133,14 +173,19 @@ func Run(o *Options, customTopics []fw.Topic) {
 		addr = ""
 	}
 
-	s := &http.Server{
-		Addr:           fmt.Sprintf("%s:%d", addr, o.Port),
-		Handler:        router,
-		ReadTimeout:    10 * time.Second,
-		WriteTimeout:   10 * time.Second,
-		MaxHeaderBytes: 1 << 20,
-	}
+	server.Addr = fmt.Sprintf("%s:%d", addr, o.Port)
+	server.Handler = router
 
 	log.Infof("ControlZ available at %s:%d", getLocalIP(), o.Port)
-	s.ListenAndServe()
+	server.ListenAndServe()
+	log.Infof("ControlZ terminated")
+}
+
+// Stop terminates ControlZ.
+//
+// Stop is not normally used by programs that expose ControlZ, it is primarily intended to be
+// used by tests.
+func Stop() {
+	server.Close()
+	shutdown.Wait()
 }

@@ -12,36 +12,6 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-package kube
+//go:generate go-bindata --nocompress --nometadata --pkg configz -o assets.gen.go assets/...
 
-import (
-	"reflect"
-	"testing"
-)
-
-func TestEntries_All(t *testing.T) {
-	e := &Schema{}
-
-	i1 := ResourceSpec{Kind: "foo"}
-	i2 := ResourceSpec{Kind: "bar"}
-
-	e.entries = append(e.entries, i1)
-	e.entries = append(e.entries, i2)
-
-	r := e.All()
-
-	expected := []ResourceSpec{i1, i2}
-	if !reflect.DeepEqual(expected, r) {
-		t.Fatalf("Mismatch Expected:\n%v\nActual:\n%v\n", expected, r)
-	}
-}
-
-func TestGetTargetFor(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatal("Should have panicked")
-		}
-	}()
-
-	getTargetFor("shazbat")
-}
+package configz

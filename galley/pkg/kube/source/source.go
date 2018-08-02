@@ -12,46 +12,63 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-package kube
+package source
 
 import (
+	"sort"
+	"strings"
 	"time"
 
+	"github.com/gogo/protobuf/proto"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	"istio.io/istio/galley/pkg/kube"
+	kube_meta "istio.io/istio/galley/pkg/metadata/kube"
 
 	"istio.io/istio/galley/pkg/runtime"
 	"istio.io/istio/galley/pkg/runtime/resource"
 	"istio.io/istio/pkg/log"
 )
 
+var scope = log.RegisterScope("kube-source", "Source for Kubernetes", 0)
+
 // source is an implementation of runtime.Source.
 type sourceImpl struct {
-	ifaces Interfaces
+	ifaces kube.Interfaces
 	ch     chan resource.Event
 
-	listeners map[resource.TypeURL]*listener
+	listeners []*listener
 }
 
 var _ runtime.Source = &sourceImpl{}
 
-// NewSource returns a Kubernetes implementation of runtime.Source.
-func NewSource(k Interfaces, resyncPeriod time.Duration) (runtime.Source, error) {
-	return newSource(k, resyncPeriod, Types.All())
+// New returns a Kubernetes implementation of runtime.Source.
+func New(k kube.Interfaces, resyncPeriod time.Duration) (runtime.Source, error) {
+	return newSource(k, resyncPeriod, kube_meta.Types.All())
 }
 
-func newSource(k Interfaces, resyncPeriod time.Duration, specs []ResourceSpec) (runtime.Source, error) {
+func newSource(k kube.Interfaces, resyncPeriod time.Duration, specs []kube.ResourceSpec) (runtime.Source, error) {
 	s := &sourceImpl{
-		ifaces:    k,
-		listeners: make(map[resource.TypeURL]*listener),
+		ifaces: k,
 	}
 
-	for _, spec := range specs {
+	sort.Slice(specs, func(i, j int) bool {
+		return strings.Compare(specs[i].CanonicalResourceName(), specs[j].CanonicalResourceName()) < 0
+	})
+
+	scope.Infof("Registering the following resources:")
+	for i, spec := range specs {
+		scope.Infof("[%d]", i)
+		scope.Infof("  Source:    %s", spec.CanonicalResourceName())
+		scope.Infof("  Type URL:  %s", spec.Target.TypeURL)
+
 		l, err := newListener(k, resyncPeriod, spec, s.process)
 		if err != nil {
+			scope.Errorf("Error registering listener: %v", err)
 			return nil, err
 		}
 
-		s.listeners[spec.Target.TypeURL] = l
+		s.listeners = append(s.listeners, l)
 	}
 
 	return s, nil
@@ -84,6 +101,15 @@ func (s *sourceImpl) Stop() {
 }
 
 func (s *sourceImpl) process(l *listener, kind resource.EventKind, key, version string, u *unstructured.Unstructured) {
+	var item proto.Message
+	var err error
+	if u != nil {
+		if key, item, err = l.spec.Converter(l.spec.Target, key, u); err != nil {
+			scope.Errorf("Unable to convert unstructured to proto: %s/%s", key, version)
+			return
+		}
+	}
+
 	rid := resource.VersionedKey{
 		Key: resource.Key{
 			TypeURL:  l.spec.Target.TypeURL,
@@ -95,16 +121,9 @@ func (s *sourceImpl) process(l *listener, kind resource.EventKind, key, version 
 	e := resource.Event{
 		ID:   rid,
 		Kind: kind,
-	}
-	if u != nil {
-		item, err := l.spec.Converter(l.spec.Target, u)
-		if err != nil {
-			log.Errorf("Unable to convert unstructured to proto: %s/%s", key, version)
-			return
-		}
-		e.Item = item
+		Item: item,
 	}
 
-	log.Debugf("Dispatching source event: %v", e)
+	scope.Debugf("Dispatching source event: %v", e)
 	s.ch <- e
 }

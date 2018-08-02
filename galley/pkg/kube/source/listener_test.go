@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-package kube
+package source
 
 import (
 	"errors"
@@ -28,12 +28,16 @@ import (
 	dtesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
 
+	"istio.io/istio/pkg/log"
+
+	"istio.io/istio/galley/pkg/kube"
+
 	"istio.io/istio/galley/pkg/runtime/resource"
 	"istio.io/istio/galley/pkg/testing/common"
 	"istio.io/istio/galley/pkg/testing/mock"
 )
 
-var info = ResourceSpec{
+var info = kube.ResourceSpec{
 	Kind:     "kind",
 	ListKind: "listkind",
 	Group:    "group",
@@ -61,6 +65,19 @@ func TestListener_NewClientError(t *testing.T) {
 	if err == nil || err.Error() != "newDynamicClient error" {
 		t.Fatalf("unexpected error: %v", err)
 	}
+}
+
+func TestListener_NewClient_Debug(t *testing.T) {
+	k := &mock.Kube{}
+	k.AddResponse(nil, errors.New("newDynamicClient error"))
+
+	processorFn := func(l *listener, eventKind resource.EventKind, key, version string, u *unstructured.Unstructured) {}
+
+	old := scope.GetOutputLevel()
+	defer scope.SetOutputLevel(old)
+	scope.SetOutputLevel(log.DebugLevel)
+	_, _ = newListener(k, 0, info, processorFn)
+	// should not crash
 }
 
 func TestListener_Basic(t *testing.T) {
@@ -497,6 +514,10 @@ func TestListener_Tombstone_ObjDecodeError(t *testing.T) {
 	defer a.stop()
 
 	a.start()
+
+	old := scope.GetOutputLevel()
+	defer scope.SetOutputLevel(old)
+	scope.SetOutputLevel(log.DebugLevel)
 
 	item := cache.DeletedFinalStateUnknown{Key: "foo", Obj: struct{}{}}
 	a.handleEvent(resource.Deleted, item)

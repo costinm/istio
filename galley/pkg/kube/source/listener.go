@@ -12,7 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
-package kube
+package source
 
 import (
 	"reflect"
@@ -26,8 +26,9 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/cache"
 
+	"istio.io/istio/galley/pkg/kube"
+
 	"istio.io/istio/galley/pkg/runtime/resource"
-	"istio.io/istio/pkg/log"
 )
 
 // processorFn is a callback function that will receive change events back from listener.
@@ -39,7 +40,7 @@ type listener struct {
 	// Lock for changing the running state of the listener
 	stateLock sync.Mutex
 
-	spec ResourceSpec
+	spec kube.ResourceSpec
 
 	resyncPeriod time.Duration
 
@@ -61,12 +62,15 @@ type listener struct {
 
 // newListener returns a new instance of an listener.
 func newListener(
-	ifaces Interfaces, resyncPeriod time.Duration, spec ResourceSpec, processor processorFn) (*listener, error) {
+	ifaces kube.Interfaces, resyncPeriod time.Duration, spec kube.ResourceSpec, processor processorFn) (*listener, error) {
 
-	log.Debugf("Creating a new resource listener for: name='%s', gv:'%v'", spec.Singular, spec.GroupVersion())
+	if scope.DebugEnabled() {
+		scope.Debugf("Creating a new resource listener for: name='%s', gv:'%v'", spec.Singular, spec.GroupVersion())
+	}
 
 	client, err := ifaces.DynamicInterface(spec.GroupVersion(), spec.Kind, spec.ListKind)
 	if err != nil {
+		scope.Debugf("Error creating dynamic interface: %s: %v", spec.CanonicalResourceName(), err)
 		return nil, err
 	}
 
@@ -87,11 +91,11 @@ func (l *listener) start() {
 	defer l.stateLock.Unlock()
 
 	if l.stopCh != nil {
-		log.Errorf("already synchronizing resources: name='%s', gv='%v'", l.spec.Singular, l.spec.GroupVersion())
+		scope.Errorf("already synchronizing resources: name='%s', gv='%v'", l.spec.Singular, l.spec.GroupVersion())
 		return
 	}
 
-	log.Debugf("Starting listener for %s(%v)", l.spec.Singular, l.spec.GroupVersion())
+	scope.Debugf("Starting listener for %s(%v)", l.spec.Singular, l.spec.GroupVersion())
 
 	l.stopCh = make(chan struct{})
 
@@ -139,7 +143,7 @@ func (l *listener) stop() {
 	defer l.stateLock.Unlock()
 
 	if l.stopCh == nil {
-		log.Errorf("already stopped")
+		scope.Errorf("already stopped")
 		return
 	}
 
@@ -152,19 +156,19 @@ func (l *listener) handleEvent(c resource.EventKind, obj interface{}) {
 	if !ok {
 		var tombstone cache.DeletedFinalStateUnknown
 		if tombstone, ok = obj.(cache.DeletedFinalStateUnknown); !ok {
-			log.Errorf("error decoding object, invalid type: %v", reflect.TypeOf(obj))
+			scope.Errorf("error decoding object, invalid type: %v", reflect.TypeOf(obj))
 			return
 		}
 		if object, ok = tombstone.Obj.(metav1.Object); !ok {
-			log.Errorf("error decoding object tombstone, invalid type: %v", reflect.TypeOf(tombstone.Obj))
+			scope.Errorf("error decoding object tombstone, invalid type: %v", reflect.TypeOf(tombstone.Obj))
 			return
 		}
-		log.Infof("Recovered deleted object '%s' from tombstone", object.GetName())
+		scope.Infof("Recovered deleted object '%s' from tombstone", object.GetName())
 	}
 
 	key, err := cache.MetaNamespaceKeyFunc(object)
 	if err != nil {
-		log.Errorf("Error creating MetaNamespaceKey from object: %v", object)
+		scope.Errorf("Error creating MetaNamespaceKey from object: %v", object)
 		return
 	}
 
@@ -172,6 +176,10 @@ func (l *listener) handleEvent(c resource.EventKind, obj interface{}) {
 
 	if uns, ok := obj.(*unstructured.Unstructured); ok {
 		u = uns
+	}
+
+	if scope.DebugEnabled() {
+		scope.Debugf("Sending event: [%v] from: %s", c, l.spec.CanonicalResourceName())
 	}
 	l.processor(l, c, key, object.GetResourceVersion(), u)
 }
