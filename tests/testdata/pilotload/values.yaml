@@ -9,13 +9,13 @@ testAServices: 10
 
 # Number of test 'rawVM' services pointing to unused IP addresses.
 # Each will create an envoy cluster and listener.
-testVMServices: 1024
+testVMServices: 256
 
 # Number of fake endpoints per service. Must be < 255
-testVMEndpoints: 32
+testVMEndpoints: 16
 
 # Number of ingress routing rules, routing "/test/N/.*" to fortio.
 # Will generate envoy RDS for ingress.
 loadTestIngress: 32
 
-loadTestReal: 32
+loadTestReal: 64

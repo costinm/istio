@@ -1,0 +1,18 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: ServiceEntry
+metadata:
+  name: vm-ingress
+spec:
+   hosts:
+   - ingress.istio-system.istio.io
+   ports:
+   - number: 80
+     name: http
+     protocol: HTTP
+   resolution: STATIC
+   endpoints:
+    - address: 10.128.0.17
+      ports:
+        http: 80
+      labels:
+        istio: ingress3

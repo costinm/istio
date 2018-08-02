@@ -8,10 +8,12 @@ global:
   meshExpansionILB: true
   refreshInterval: 30s
   imagePullPolicy: Always
-  configValidation: false
+  #configValidation: false
   ingressSelector: ingressgateway
   proxy_init:
     image: costinm/proxy_init:tproxy
+  # Don't apply again.
+  crds: false
 
   proxy:
     accessLogFile: ""
@@ -90,10 +92,10 @@ pilot:
   #image: costinm/pilot:costin-dev
   resources:
     requests:
-      cpu: 2800m
-      memory: 2G
+      cpu: 6800m
+      memory: 8G
   env:
-
+    PILOT_PUSH_THROTTLE_COUNT: "500"
 
 ingress:
   enabled: false

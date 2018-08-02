@@ -73,10 +73,10 @@ spec:
             value: "500"
           - name: PILOT_CACHE_SQUASH
             value: "5"
-          {{- if .Values.Env }}
-          {{- range $key, $val := .Values.Env }}
+          {{- if .Values.env }}
+          {{- range $key, $val := .Values.env }}
           - name: {{ $key }}
-            value: {{ $val }}
+            value: "{{ $val }}"
           {{- end }}
           {{- end }}
 {{- if .Values.traceSampling }}

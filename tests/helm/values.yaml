@@ -10,7 +10,7 @@ istioNamespace: istio-system
 #fortioImage: istio/fortio:latest
 fortioImage: istio/fortio:1.0.1
 
-qps: 500
+qps: 300
 
 # Number of test cluster-IP services pointing to A. Used to create a realistic
 # number of k-8s managed endpoint sets

@@ -1,0 +1,10 @@
+apiVersion: v1
+name: istiotestapp
+version: 1.0
+description: Helm chart for istio integration test
+keywords:
+  - istio
+sources:
+  - http://github.com/istio/istio
+engine: gotpl
+icon: https://istio.io/favicons/android-192x192.png

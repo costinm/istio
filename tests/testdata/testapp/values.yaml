@@ -1,0 +1,6 @@
+healthPort: true
+testHub: docker.io/istionightly
+testTag: nightly-release-1.0
+#fortioImage: istio/fortio:latest
+fortioImage: istio/fortio:1.0.1
+healthCheck: true

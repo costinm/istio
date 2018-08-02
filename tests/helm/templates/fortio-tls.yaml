@@ -60,7 +60,7 @@ spec:
     metadata:
       annotations:
         # Pointing to the mesh gateway, with tls
-        sidecar.istio.io/controlPlaneAuthPolicy: MUTUAL_TLS
+        sidecar.istio.io/controlPlaneAuthPolicy: MUTUAL_TJLS
         sidecar.istio.io/discoveryAddress: pilot.{{ .Values.domain }}:15011
       labels:
         app: fortiotls

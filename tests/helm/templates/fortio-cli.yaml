@@ -24,7 +24,7 @@ spec:
           - -t
           - "0"
           - -c
-          - "64"
+          - "8"
           - -qps
           - "{{ .Values.qps }}"
           - http://fortiotls.{{ .Values.domain }}/echo?size=5000
@@ -39,13 +39,13 @@ spec:
 apiVersion: apps/v1beta1
 kind: Deployment
 metadata:
-  name: fortio-cli-raw
+  name: fortio-cli-noistio
 spec:
   replicas: 8
   template:
     metadata:
       labels:
-        app: fortio-cli-raw
+        app: fortio-cli-noistio
         version: v1
       annotations:
         sidecar.istio.io/inject: "false"
@@ -59,7 +59,7 @@ spec:
           - -t
           - "0"
           - -c
-          - "64"
+          - "8"
           - -qps
           - "{{ .Values.qps }}"
           - http://fortionoistio.{{ .Values.domain }}/echo?size=5000
@@ -74,13 +74,13 @@ spec:
 apiVersion: apps/v1beta1
 kind: Deployment
 metadata:
-  name: fortio-cli-notls
+  name: fortio-cli-nightly
 spec:
-  replicas: 4
+  replicas: 1
   template:
     metadata:
       labels:
-        app: fortio-cli1
+        app: fortio-cli-nightly
         version: v1
       annotations:
         sidecar.istio.io/inject: "false"
@@ -210,40 +210,7 @@ spec:
           limits:
             cpu: 500m
             memory: "1G"
----
-apiVersion: apps/v1beta1
-kind: Deployment
-metadata:
-  name: cli-fortio-v1-direct
-spec:
-  replicas: 1
-  template:
-    metadata:
-      labels:
-        name: ncli-fortio-v1-direct
-        app: cli-fortio-v1-direct
-        version: cli-fortio-v1-direct
-    spec:
-      containers:
-      - name: echosrv
-        image: istio/fortio:latest
-        imagePullPolicy: Always
-        args:
-          - load
-          - -t
-          - "0"
-          - -c
-          - "32"
-          - -qps
-          - "{{ .Values.qps }}"
-          - http://fortiov1.test:8080/echo?size=5000
-        resources:
-          requests:
-            cpu: 400m
-            memory: "1G"
-          limits:
-            cpu: 500m
-            memory: "1G"
+
 ---
 apiVersion: apps/v1beta1
 kind: Deployment
