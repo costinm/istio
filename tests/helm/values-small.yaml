@@ -25,3 +25,6 @@ testVMServices: 1
 # Will generate envoy RDS for ingress.
 loadTestIngress: 1
 healthCheck: true
+
+fortioCPU: 100m
+fortioCliCPU: 100m

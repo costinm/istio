@@ -197,7 +197,7 @@ func setup() error {
 
 	// Wait a bit for the server to come up.
 	// TODO(nmittler): Change to polling health endpoint once https://github.com/istio/istio/pull/2002 lands.
-	time.Sleep(time.Second)
+	time.Sleep(2 * time.Second)
 
 	return nil
 }

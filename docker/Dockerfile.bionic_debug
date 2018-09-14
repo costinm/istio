@@ -1,4 +1,4 @@
-FROM ubuntu:xenial
+FROM ubuntu:bionic
 # Base image for debug builds.
 # Built manually uploaded as "istionightly/base_debug"
 
@@ -16,7 +16,7 @@ RUN apt-get update && \
       tcpdump \
       net-tools \
       lsof \
-      sudo &&  apt-get upgrade -y && \
+      sudo && \
       apt-get clean -y && \
       rm -rf /var/cache/debconf/* /var/lib/apt/lists/* \
         /var/log/* /tmp/*  /var/tmp/*

@@ -23,6 +23,10 @@ spec:
         {{- end }}
       annotations:
         sidecar.istio.io/inject: "false"
+        {{- if $.Values.global.proxy.envoyStatsd.enabled }}
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9102"
+        {{- end }}
         scheduler.alpha.kubernetes.io/critical-pod: ""
     spec:
       serviceAccountName: {{ $key }}-service-account
@@ -30,6 +34,15 @@ spec:
       priorityClassName: "{{ $.Values.global.priorityClassName }}"
 {{- end }}
       containers:
+       {{- if $.Values.global.proxy.envoyStatsd.enabled }}
+        - name: statsd
+          image: "docker.io/prom/statsd-exporter:v0.6.0"
+          imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
+          ports:
+          - containerPort: 9102
+          - containerPort: 9105
+            protocol: UDP
+        {{- end }}
         - name: istio-proxy
           image: "{{ $.Values.global.hub }}/proxyv2:{{ $.Values.global.tag }}"
           imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
@@ -60,7 +73,7 @@ spec:
         {{- end }}
         {{- if $.Values.global.proxy.envoyStatsd.enabled }}
           - --statsdUdpAddress
-          - {{ $.Values.global.proxy.envoyStatsd.host }}:{{ $.Values.global.proxy.envoyStatsd.port }}
+          - 127.0.0.1:9105
         {{- end }}
           - --proxyAdminPort
           - "15000"
@@ -90,6 +103,10 @@ spec:
 {{ toYaml $.Values.global.defaultResources | indent 12 }}
 {{- end }}
           env:
+          - name: ISTIO_META_sidecar.istio.io_policy
+            value: "off"
+          - name: ISTIO_META_sidecar.istio.io_telemetry
+            value: "off"
           - name: POD_NAME
             valueFrom:
               fieldRef:

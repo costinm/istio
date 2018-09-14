@@ -74,6 +74,15 @@ data:
           privileged: true
       {{ end }}
       containers:
+      {{- if .Values.global.proxy.envoyStatsd.enabled }}
+      - name: statsd
+        image: "docker.io/prom/statsd-exporter:v0.6.0"
+        imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
+        ports:
+        - containerPort: 9102
+        - containerPort: 9105
+          protocol: UDP
+      {{- end }}
       - name: istio-proxy
         image: {{ "[[ if (isset .ObjectMeta.Annotations \"sidecar.istio.io/proxyImage\") -]]" }}
         {{ "\"[[ index .ObjectMeta.Annotations \"sidecar.istio.io/proxyImage\" ]]\"" }}
@@ -107,7 +116,7 @@ data:
         - {{ "[[ formatDuration .ProxyConfig.ConnectTimeout ]]" }}
       {{- if .Values.global.proxy.envoyStatsd.enabled }}
         - --statsdUdpAddress
-        - {{ "[[ .ProxyConfig.StatsdUdpAddress ]]" }}
+        - {{ "127.0.0.1:9105" }}
       {{- end }}
         - --proxyAdminPort
         - {{ "[[ .ProxyConfig.ProxyAdminPort ]]" }}
