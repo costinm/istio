@@ -30,6 +30,7 @@ import (
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pilot/pkg/networking/util"
 	"istio.io/istio/pilot/pkg/serviceregistry/aggregate"
+	"os"
 )
 
 // EDS returns the list of endpoints (IP:port and in future labels) associated with a real
@@ -63,6 +64,10 @@ var (
 	connectionNumber = int64(0)
 
 	errIncomplete = errors.New("EDS incremental: incomplete information")
+
+	// edsPartial will push only what changed - Envoy aledgedly will not delete
+	// or modify clusters if an EDS push doesn't contain any data about said cluster.
+	edsPartial = os.Getenv("EDS_PARTIAL") != "0"
 )
 
 // EdsCluster tracks eds-related info for monitored clusters. In practice it'll include
@@ -180,7 +185,7 @@ func newEndpoint(e *model.NetworkEndpoint) (*endpoint.LbEndpoint, error) {
 
 // updateClusterInc computes an envoy cluster assignment from the service shards.
 func (s *DiscoveryServer) updateClusterInc(push *model.PushContext, clusterName string,
-	edsCluster *EdsCluster, edsChangedServices []string) error {
+	edsCluster *EdsCluster) error {
 
 	var hostname model.Hostname
 	//var ports model.PortList
@@ -193,16 +198,16 @@ func (s *DiscoveryServer) updateClusterInc(push *model.PushContext, clusterName 
 
 	portMap, f := push.ServicePort2Name[string(hostname)]
 	if !f {
-		return s.updateCluster(push, clusterName, edsCluster, edsChangedServices)
+		return s.updateCluster(push, clusterName, edsCluster)
 	}
 	portName, f := portMap[uint32(port)]
 	if !f {
-		return s.updateCluster(push, clusterName, edsCluster, edsChangedServices)
+		return s.updateCluster(push, clusterName, edsCluster)
 	}
 
 	se, f := s.EndpointShardsByService[string(hostname)]
 	if !f {
-		return s.updateCluster(push, clusterName, edsCluster, edsChangedServices)
+		return s.updateCluster(push, clusterName, edsCluster)
 	}
 
 	cnt := 0
@@ -333,7 +338,7 @@ func (s *DiscoveryServer) updateServiceShards(push *model.PushContext) error {
 // updateCluster is called from the event (or global cache invalidation) to update
 // the endpoints for the cluster.
 func (s *DiscoveryServer) updateCluster(push *model.PushContext, clusterName string,
-	edsCluster *EdsCluster, edsChangedServices []string) error {
+	edsCluster *EdsCluster) error {
 	// TODO: should we lock this as well ? Once we move to event-based it may not matter.
 	var hostname model.Hostname
 	//var ports model.PortList
@@ -345,7 +350,6 @@ func (s *DiscoveryServer) updateCluster(push *model.PushContext, clusterName str
 		var p int
 		var subsetName string
 		_, subsetName, hostname, p = model.ParseSubsetKey(clusterName)
-		// TODO: if edsChangedServices != nil -> filter out cluster that didn't change.
 
 		labels = push.SubsetToLabels(subsetName, hostname)
 
@@ -393,10 +397,9 @@ func (s *DiscoveryServer) SvcUpdate(cluster, hostname string, ports map[string]u
 
 // Update clusters for an incremental EDS push, and initiate the push.
 // Only clusters that changed are updated/pushed.
-func (s *DiscoveryServer) edsIncremental(version string, push *model.PushContext,
-	edsServices []string) {
+func (s *DiscoveryServer) edsIncremental(version string, push *model.PushContext) {
 	adsLog.Infof("XDS:EDSInc Pushing %s Services: %v, "+
-		"VirtualServices: %d, ConnectedEndpoints: %d", version, edsServices,
+		"VirtualServices: %d, ConnectedEndpoints: %d", version, s.EDSUpdates,
 		len(push.VirtualServiceConfigs), adsClientCount())
 	t0 := time.Now()
 
@@ -406,10 +409,13 @@ func (s *DiscoveryServer) edsIncremental(version string, push *model.PushContext
 	// Create a temp map to avoid locking the add/remove
 	cMap := make(map[string]*EdsCluster, len(edsClusters))
 	for k, v := range edsClusters {
-		//_, _, hostname, _ := model.ParseSubsetKey(k)
-		//if string(hostname) != edsServices {
-		//	continue
-		//}
+		_, _, hostname, _ := model.ParseSubsetKey(k)
+		s.mutex.RLock()
+		if s.EDSUpdates[string(hostname)] == nil {
+			// Cluster was not updated, skip recomputing.
+			continue
+		}
+		s.mutex.RUnlock()
 		cMap[k] = v
 	}
 	edsClusterMutex.Unlock()
@@ -418,13 +424,13 @@ func (s *DiscoveryServer) edsIncremental(version string, push *model.PushContext
 	// the update may be duplicated if multiple goroutines compute at the same time).
 	// In general this code is called from the 'event' callback that is throttled.
 	for clusterName, edsCluster := range cMap {
-		if err := s.updateClusterInc(push, clusterName, edsCluster, edsServices); err != nil {
+		if err := s.updateClusterInc(push, clusterName, edsCluster); err != nil {
 			adsLog.Errorf("updateCluster failed with clusterName %s", clusterName)
 		}
 	}
 	adsLog.Infof("Cluster init time %v %s", time.Since(t0), version)
 
-	s.startPush(version, push, false, edsServices)
+	s.startPush(version, push, false)
 }
 
 // EDSUpdate computes destination address membership across all clusters and networks.
@@ -463,7 +469,7 @@ func (s *DiscoveryServer) EDSUpdate(shard, serviceName string,
 		ce.Entries = append(ce.Entries, e)
 	}
 	ep.Shards[shard] = ce
-	s.Updates[serviceName] = &ep
+	s.EDSUpdates[serviceName] = &ep
 
 	adsLog.Infof("EDS Entries: %s %s %v", shard, serviceName, entries)
 	return nil
@@ -530,8 +536,10 @@ func connectionID(node string) string {
 	return node + "-" + strconv.Itoa(int(c))
 }
 
-
-func (s *DiscoveryServer) pushEds(push *model.PushContext, con *XdsConnection) error {
+// pushEds is pushing EDS updates for a single connection. Called the first time
+// a client connects, for incremental updates and for full periodic updates.
+func (s *DiscoveryServer) pushEds(push *model.PushContext, con *XdsConnection,
+	full bool) error {
 	resAny := []types.Any{}
 
 	emptyClusters := 0
@@ -547,7 +555,7 @@ func (s *DiscoveryServer) pushEds(push *model.PushContext, con *XdsConnection) e
 
 		l := loadAssignment(c)
 		if l == nil { // fresh cluster
-			if err := s.updateCluster(push, clusterName, c, nil); err != nil {
+			if err := s.updateCluster(push, clusterName, c); err != nil {
 				adsLog.Errorf("error returned from updateCluster for cluster name %s, skipping it.", clusterName)
 				continue
 			}

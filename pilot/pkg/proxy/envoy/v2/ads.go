@@ -240,7 +240,7 @@ type XdsEvent struct {
 
 	// If not empty, it is used to indicate the event is caused by a change in the clusters.
 	// Only EDS for the listed clusters will be sent.
-	edsUpdatedServices []string
+	edsUpdatedServices map[string]*ServiceShards
 
 	push *model.PushContext
 
@@ -460,7 +460,7 @@ func (s *DiscoveryServer) StreamAggregatedResources(stream ads.AggregatedDiscove
 
 				con.Clusters = clusters
 				adsLog.Debugf("ADS:EDS: REQ %s %s clusters: %d", peerAddr, con.ConID, len(con.Clusters))
-				err := s.pushEds(s.Env.PushContext, con)
+				err := s.pushEds(s.Env.PushContext, con, true)
 				if err != nil {
 					return err
 				}
@@ -499,7 +499,7 @@ func (s *DiscoveryServer) pushAll(con *XdsConnection, pushEv *XdsEvent) error {
 		// Push only EDS. This is indexed already - push immediately
 		// (may need a throttle)
 		if len(con.Clusters) > 0 {
-			err := s.pushEds(pushEv.push, con)
+			err := s.pushEds(pushEv.push, con, false)
 			if err != nil {
 				return err
 			}
@@ -546,7 +546,7 @@ func (s *DiscoveryServer) pushAll(con *XdsConnection, pushEv *XdsEvent) error {
 		}
 	}
 	if len(con.Clusters) > 0 {
-		err := s.pushEds(pushEv.push, con)
+		err := s.pushEds(pushEv.push, con, true)
 		if err != nil {
 			return err
 		}
@@ -578,7 +578,7 @@ func AdsPushAll(s *DiscoveryServer) {
 // to the model ConfigStorageCache and Controller.
 func (s *DiscoveryServer) AdsPushAll(version string, push *model.PushContext, full bool, edsServices []string) {
 	if !full {
-		s.edsIncremental(version, push, edsServices)
+		s.edsIncremental(version, push)
 		return
 	}
 
@@ -604,17 +604,16 @@ func (s *DiscoveryServer) AdsPushAll(version string, push *model.PushContext, fu
 	// the update may be duplicated if multiple goroutines compute at the same time).
 	// In general this code is called from the 'event' callback that is throttled.
 	for clusterName, edsCluster := range cMap {
-		if err := s.updateCluster(push, clusterName, edsCluster, edsServices); err != nil {
+		if err := s.updateCluster(push, clusterName, edsCluster); err != nil {
 			adsLog.Errorf("updateCluster failed with clusterName %s", clusterName)
 		}
 	}
 	adsLog.Infof("Cluster init time %v %s", time.Since(t0), version)
-	s.startPush(version, push, full, edsServices)
-
+	s.startPush(version, push, full)
 }
 
 // Send a signal to all connections, with a push event.
-func (s *DiscoveryServer) startPush(version string, push *model.PushContext, full bool, edsServices []string) {
+func (s *DiscoveryServer) startPush(version string, push *model.PushContext, full bool) {
 
 		// Push config changes, iterating over connected envoys. This cover ADS and EDS(0.7), both share
 	// the same connection table
@@ -659,7 +658,7 @@ func (s *DiscoveryServer) startPush(version string, push *model.PushContext, ful
 			push:               push,
 			pending:            &pendingPush,
 			version:            version,
-			edsUpdatedServices: edsServices,
+			edsUpdatedServices: s.EDSUpdates,
 		}:
 			client.LastPush = time.Now()
 			client.LastPushFailure = timeZero

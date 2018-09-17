@@ -83,24 +83,28 @@ type DiscoveryServer struct {
 	// incremental updates.
 	EndpointShardsByService map[string]ServiceShards
 
-	// Updates keeps track of all service updates since last full push.
-	// Key is the hostname (servicename).
-	Updates map[string]*ServiceShards
+	// EDSUpdates keeps track of all service updates since last full push.
+	// Key is the hostname (servicename). Value is set when any shard part of the service is
+	// updated.
+	EDSUpdates map[string]*ServiceShards
 
 	mutex sync.RWMutex
 }
 
-//
+// ServiceShards holds the set of endpoint shards of a service. Registries update
+// individual shards incrementally. The shards are aggregated and split into
+// clusters when a push for the specific cluster is needed.
 type ServiceShards struct {
 
-	// ByCluster is used to track cluster membership. EDS updates are grouped by cluster,
-	// must be combined with the other clusters for push.
+	// Shards is used to track the shards. EDS updates are grouped by shard.
+	// Current implementation uses the registry name as key - in multicluster this is the
+	// name of the k8s cluster, derived from the config (secret).
 	Shards map[string]*EndpointShard
-
 }
 
-// EndpointShard contains all the endpoints for a single shard of a service.
-// Shards are updated atomically.
+// EndpointShard contains all the endpoints for a single shard (subset) of a service.
+// Shards are updated atomically by registries. A registry may split a service into
+// multiple shards (for example each deployment, or smaller sub-sets).
 type EndpointShard struct {
 	Shard string
 	Entries []*model.IstioEndpoint
@@ -126,7 +130,7 @@ func NewDiscoveryServer(env *model.Environment, generator core.ConfigGenerator) 
 		Env:                     env,
 		ConfigGenerator:         generator,
 		EndpointShardsByService: map[string]ServiceShards{},
-		Updates: map[string]*ServiceShards{},
+		EDSUpdates:              map[string]*ServiceShards{},
 	}
 	env.PushContext = model.NewPushContext()
 

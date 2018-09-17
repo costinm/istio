@@ -47,8 +47,6 @@ func TestEds(t *testing.T) {
 	adsc := adsConnectAndWait(t, 0x0a0a0a0a)
 	defer adsc.Close()
 
-	go http.ListenAndServe(":9900", nil)
-
 	t.Run("TCPEndpoints", func(t *testing.T) {
 		testTCPEndpoints("127.0.0.1", adsc, t)
 	})
@@ -62,10 +60,10 @@ func TestEds(t *testing.T) {
 		edsUpdates(server, adsc, t)
 	})
 	t.Run("MultipleRequest", func(t *testing.T) {
-		multipleRequest(server, false, t)
+		multipleRequest(server, false, 100, 10, 20 * time.Second, t)
 	})
 	t.Run("MultipleRequestIncremental", func(t *testing.T) {
-		multipleRequest(server, true, t)
+		multipleRequest(server, true, 100, 10, 20 * time.Second, t)
 	})
 	t.Run("edsz", func(t *testing.T) {
 		testEdsz(t)
@@ -196,7 +194,7 @@ func edsUpdateInc(server *bootstrap.Server, adsc *adsc.ADSC, t *testing.T) {
 // Make a direct EDS grpc request to pilot, verify the result is as expected.
 // This test includes a 'bad client' regression test, which fails to read on the
 // stream.
-func multipleRequest(server *bootstrap.Server, inc bool, t *testing.T) {
+func multipleRequest(server *bootstrap.Server, inc bool, nclients, nPushes int, to time.Duration, t *testing.T) {
 	wgConnect := &sync.WaitGroup{}
 	wg := &sync.WaitGroup{}
 
@@ -213,8 +211,7 @@ func multipleRequest(server *bootstrap.Server, inc bool, t *testing.T) {
 		t.Fatal(err)
 	}
 
-	n := 100 // clients
-	nPushes := 2
+	n := nclients
 	wg.Add(n)
 	wgConnect.Add(n)
 	rcvPush := int32(0)
@@ -261,7 +258,7 @@ func multipleRequest(server *bootstrap.Server, inc bool, t *testing.T) {
 			atomic.AddInt32(&rcvClients, 1)
 		}(current)
 	}
-	ok := waitTimeout(wgConnect, 20*time.Second)
+	ok := waitTimeout(wgConnect, to)
 	if !ok {
 		t.Fatal("Failed to connect")
 	}
@@ -277,7 +274,7 @@ func multipleRequest(server *bootstrap.Server, inc bool, t *testing.T) {
 		log.Println("Push done ", j)
 	}
 
-	ok = waitTimeout(wg, 30*time.Second)
+	ok = waitTimeout(wg, to)
 	if !ok {
 		t.Errorf("Failed to receive all responses %d %d", rcvClients, rcvPush)
 		buf := make([]byte, 1<<16)
