@@ -30,8 +30,8 @@ import (
 	"istio.io/istio/pilot/pkg/bootstrap"
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pilot/pkg/proxy/envoy/v2"
-	"istio.io/istio/tests/util"
 	"istio.io/istio/pkg/adsc"
+	"istio.io/istio/tests/util"
 )
 
 // The connect and reconnect tests are removed - ADS already has coverage, and the
@@ -60,10 +60,10 @@ func TestEds(t *testing.T) {
 		edsUpdates(server, adsc, t)
 	})
 	t.Run("MultipleRequest", func(t *testing.T) {
-		multipleRequest(server, false, 100, 10, 20 * time.Second, t)
+		multipleRequest(server, false, 100, 10, 20*time.Second, t)
 	})
 	t.Run("MultipleRequestIncremental", func(t *testing.T) {
-		multipleRequest(server, true, 100, 10, 20 * time.Second, t)
+		multipleRequest(server, true, 100, 10, 20*time.Second, t)
 	})
 	t.Run("edsz", func(t *testing.T) {
 		testEdsz(t)
@@ -72,14 +72,14 @@ func TestEds(t *testing.T) {
 }
 
 func adsConnectAndWait(t *testing.T, ip int) *adsc.ADSC {
-	adsc, err := adsc.Dial(util.MockPilotGrpcAddr, "", &adsc.ADSCOpt{
+	adsc, err := adsc.Dial(util.MockPilotGrpcAddr, "", &adsc.Config{
 		IP: testIp(uint32(ip)),
 	})
 	if err != nil {
 		t.Fatal("Error connecting ", err)
 	}
 	adsc.Watch()
-	_, err = adsc.Wait("rds", 5 * time.Second)
+	_, err = adsc.Wait("rds", 5*time.Second)
 	if err != nil {
 		t.Fatal("Error getting initial config ", err)
 	}
@@ -89,7 +89,6 @@ func adsConnectAndWait(t *testing.T, ip int) *adsc.ADSC {
 	}
 	return adsc
 }
-
 
 // Verify server sends the TCP endpoint
 func testTCPEndpoints(expected string, adsc *adsc.ADSC, t *testing.T) {
@@ -105,7 +104,6 @@ func testTCPEndpoints(expected string, adsc *adsc.ADSC, t *testing.T) {
 	t.Errorf("Expecting %s got %v", expected, lbe.Endpoints[0].LbEndpoints)
 
 }
-
 
 // Verify server sends UDS endpoints
 func testUdsEndpoints(server *bootstrap.Server, adsc *adsc.ADSC, t *testing.T) {
@@ -149,7 +147,7 @@ func edsUpdates(server *bootstrap.Server, adsc *adsc.ADSC, t *testing.T) {
 	v2.AdsPushAll(server.EnvoyXdsServer)
 	// will trigger recompute and push
 
-	_, err := adsc.Wait("eds", 5 * time.Second)
+	_, err := adsc.Wait("eds", 5*time.Second)
 	if err != nil {
 		t.Fatal("EDS push failed", err)
 	}
@@ -164,25 +162,25 @@ func edsUpdateInc(server *bootstrap.Server, adsc *adsc.ADSC, t *testing.T) {
 	// Equivalent with K8S watching the Service.
 	server.EnvoyXdsServer.MemRegistry.SetEndpoints(
 		"hello.default.svc.cluster.local",
-		[]*model.IstioEndpoint {
+		[]*model.IstioEndpoint{
 			&model.IstioEndpoint{
-				Address: "127.0.0.2",
+				Address:         "127.0.0.2",
 				ServicePortName: "http",
-				EndpointPort: 80,
-				Labels: &map[string]string{"version": "v1"},
-				UID: "uid1",
+				EndpointPort:    80,
+				Labels:          &map[string]string{"version": "v1"},
+				UID:             "uid1",
 			},
 		})
 
 	// This should happen in 15 seconds, for the periodic refresh
 	// TODO: verify push works
-	upd, err := adsc.Wait("", 5 * time.Second)
+	upd, err := adsc.Wait("", 5*time.Second)
 	if err != nil {
 		t.Fatal("Incremental push failed", err)
 	}
 	if upd != "eds" {
 		t.Error("Expecting EDS only update")
-		upd, err = adsc.Wait("eds", 5 * time.Second)
+		_, err = adsc.Wait("eds", 5*time.Second)
 		if err != nil {
 			t.Fatal("Incremental push failed", err)
 		}
@@ -220,15 +218,15 @@ func multipleRequest(server *bootstrap.Server, inc bool, nclients, nPushes int, 
 		current := i
 		go func(id int) {
 			// Connect and get initial response
-			adsc, err := adsc.Dial(util.MockPilotGrpcAddr, "", &adsc.ADSCOpt{
-				IP: testIp(uint32(0x0a100000+id)),
+			adsc, err := adsc.Dial(util.MockPilotGrpcAddr, "", &adsc.Config{
+				IP: testIp(uint32(0x0a100000 + id)),
 			})
 			if err != nil {
 				t.Fatal("Error connecting ", err)
 			}
 			defer adsc.Close()
 			adsc.Watch()
-			_, err = adsc.Wait("rds", 5 * time.Second)
+			_, err = adsc.Wait("rds", 5*time.Second)
 			if err != nil {
 				t.Fatal("Error getting initial config ", err)
 			}
@@ -265,9 +263,12 @@ func multipleRequest(server *bootstrap.Server, inc bool, nclients, nPushes int, 
 	log.Println("Done connecting")
 	for j := 0; j < nPushes; j++ {
 		if inc {
+			server.EnvoyXdsServer.Env.EDSUpdates["hello.default.svc.cluster.local"] =
+				&model.ServiceShards{}
+
 			server.EnvoyXdsServer.AdsPushAll("v1",
 				server.EnvoyXdsServer.Env.PushContext,
-				false, []string{"hello.default.svc.cluster.local"})
+				false, server.EnvoyXdsServer.Env.EDSUpdates)
 		} else {
 			v2.AdsPushAll(server.EnvoyXdsServer)
 		}
@@ -282,7 +283,6 @@ func multipleRequest(server *bootstrap.Server, inc bool, nclients, nPushes int, 
 		fmt.Printf("%s", buf)
 	}
 }
-
 
 func waitTimeout(wg *sync.WaitGroup, timeout time.Duration) bool {
 	c := make(chan struct{})
@@ -330,7 +330,6 @@ func addUdsEndpoint(server *bootstrap.Server) {
 
 	server.EnvoyXdsServer.Push(true, nil)
 }
-
 
 // Verify the endpoint debug interface is installed and returns some string.
 // TODO: parse response, check if data captured matches what we expect.

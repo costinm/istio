@@ -131,11 +131,11 @@ data:
         - name: ISTIO_META_INTERCEPTION_MODE
           value: {{ "[[ annotation .ObjectMeta `sidecar.istio.io/interceptionMode` .ProxyConfig.InterceptionMode ]]" }}
         {{ "[[ range $k,$v := .ObjectMeta.Annotations ]]" }}
-        - name: ISTIO_META_ANN_{{ "[[ $k ]]" }}
+        - name: ISTIO_META_{{ "[[ annotationEscape $k ]]" }}
           value: {{ "[[ $v ]]" }}
         {{ "[[ end ]]" }}
         {{ "[[ range $k,$v := .ObjectMeta.Labels ]]" }}
-        - name: ISTIO_META_LBL_{{ "[[ $k ]]" }}
+        - name: ISTIO_META_{{ "[[ $k ]]" }}
           value: {{ "[[ $v ]]" }}
         {{ "[[ end ]]" }}
         imagePullPolicy: {{ .Values.global.imagePullPolicy }}

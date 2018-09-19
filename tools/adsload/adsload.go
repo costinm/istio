@@ -14,29 +14,35 @@
 
 package main
 
+// Will create the specified number of ADS connections to the pilot, and keep
+// receiving notifications. This creates a load on pilot - without having to
+// run a large number of pods in k8s.
+// The clients will use 10.10.x.x addresses - it is possible to create ServiceEntry
+// objects so clients get inbound listeners. Otherwise only outbound config will
+// be pushed.
+
 import (
 	"flag"
 	"log"
+	"time"
 
 	"net"
+
 	"istio.io/istio/pkg/adsc"
 )
 
 var (
-	clients   = flag.Int("clients",
-		1,
+	clients = flag.Int("clients",
+		100,
 		"Number of ads clients")
 
 	pilotAddr = flag.String("pilot",
 		"localhost:15010",
-		//"pilot.v10.istio.webinf.info:15011",
-		"Pilot address")
+		"Pilot address. Can be a real pilot exposed for mesh expansion.")
 
 	certDir = flag.String("certDir",
 		"", // /etc/certs",
-		"Certificate dir")
-
-	verbose = false
+		"Certificate dir. Must be set according to mesh expansion docs for testing a meshex pilot.")
 )
 
 func main() {
@@ -51,51 +57,30 @@ func main() {
 
 // runClient creates a single long lived connection
 func runClient(n int) {
-	adsc, err := adsc.Dial(*pilotAddr, *certDir, &adsc.ADSCOpt{
-		IP: net.IPv4(10, 10, byte(n / 256), byte(n % 256)).String(),
+	c, err := adsc.Dial(*pilotAddr, *certDir, &adsc.Config{
+		IP: net.IPv4(10, 10, byte(n/256), byte(n%256)).String(),
 	})
 	if err != nil {
 		log.Println("Error connecting ", err)
 		return
 	}
 
-	//t0 := time.Now()
+	t0 := time.Now()
 
-	adsc.Watch()
+	c.Watch()
 
-	//adsc.SendRsc(v2.RouteType, "ingress~10.10.10.10~istio-ingress-794f555d7b-5fm48.istio-system~istio-system.svc.cluster.local-36", []string{
-	//	"http.80",
-	//	"http.443",
-	//})
-
-	//for {
-		//msg, err := adsc.Recv(15 * time.Second)
-		//if err != nil {
-		//	log.Println("Stream closed:", err)
-		//	return
-		//} else {
-		//	for _, rsc := range msg.Resources {
-		//		if verbose {
-		//			log.Println(msg.VersionInfo, rsc.TypeUrl)
-		//			if rsc.TypeUrl == v2.ListenerType {
-		//				valBytes := rsc.Value
-		//				ll := &xdsapi.Listener{}
-		//				proto.Unmarshal(valBytes, ll)
-		//
-		//				tm := &jsonpb.Marshaler{Indent: "  "}
-		//				log.Println(tm.MarshalToString(ll))
-		//			} else if rsc.TypeUrl == v2.RouteType {
-		//				valBytes := rsc.Value
-		//				ll := &xdsapi.RouteConfiguration{}
-		//				proto.Unmarshal(valBytes, ll)
-		//
-		//				tm := &jsonpb.Marshaler{Indent: "  "}
-		//				log.Println(tm.MarshalToString(ll))
-		//			}
-		//		}
-		//	}
-		//	log.Println("Received ", len(msg.Resources), time.Since(t0))
-		//	adsc.Ack(msg)
-		//}
+	_, err = c.Wait("rds", 30*time.Second)
+	if err != nil {
+		log.Println("Timeout receiving RDS")
 	}
 
+	log.Println("Initial connection: ", time.Since(t0))
+
+	for {
+		msg, err := c.Wait("", 15*time.Second)
+		if err == adsc.TimeoutError {
+			continue
+		}
+		log.Println("Received ", msg)
+	}
+}

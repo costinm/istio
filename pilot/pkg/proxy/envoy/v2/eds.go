@@ -22,15 +22,17 @@ import (
 	"sync"
 	"time"
 
+	"os"
+
 	xdsapi "github.com/envoyproxy/go-control-plane/envoy/api/v2"
 	"github.com/envoyproxy/go-control-plane/envoy/api/v2/core"
 	"github.com/envoyproxy/go-control-plane/envoy/api/v2/endpoint"
 	"github.com/gogo/protobuf/types"
 	"github.com/prometheus/client_golang/prometheus"
+
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pilot/pkg/networking/util"
 	"istio.io/istio/pilot/pkg/serviceregistry/aggregate"
-	"os"
 )
 
 // EDS returns the list of endpoints (IP:port and in future labels) associated with a real
@@ -63,10 +65,11 @@ var (
 	// Tracks connections, increment on each new connection.
 	connectionNumber = int64(0)
 
-	errIncomplete = errors.New("EDS incremental: incomplete information")
-
-	// edsPartial will push only what changed - Envoy aledgedly will not delete
+	// edsPartial will push only what changed - Envoy will not delete
 	// or modify clusters if an EDS push doesn't contain any data about said cluster.
+	// This speeds up the push and reduces memory/CPU use on pilot, and allows scaling
+	// to larger number of endpoints.
+	// On by default - can be turned off in case of unexpected problems.
 	edsPartial = os.Getenv("EDS_PARTIAL") != "0"
 )
 
@@ -317,11 +320,11 @@ func (s *DiscoveryServer) updateServiceShards(push *model.PushContext) error {
 					//shard := ep.AvailabilityZone
 					l := map[string]string(ep.Labels)
 					entries = append(entries, &model.IstioEndpoint{
-						Address: ep.Endpoint.Address,
-						EndpointPort: uint32(ep.Endpoint.Port),
+						Address:         ep.Endpoint.Address,
+						EndpointPort:    uint32(ep.Endpoint.Port),
 						ServicePortName: port.Name,
-						Labels:  &l,
-						UID: ep.Endpoint.UID,
+						Labels:          &l,
+						UID:             ep.Endpoint.UID,
 					})
 				}
 			}
@@ -397,9 +400,9 @@ func (s *DiscoveryServer) SvcUpdate(cluster, hostname string, ports map[string]u
 
 // Update clusters for an incremental EDS push, and initiate the push.
 // Only clusters that changed are updated/pushed.
-func (s *DiscoveryServer) edsIncremental(version string, push *model.PushContext) {
+func (s *DiscoveryServer) edsIncremental(version string, push *model.PushContext, edsUpdates map[string]*model.ServiceShards) {
 	adsLog.Infof("XDS:EDSInc Pushing %s Services: %v, "+
-		"VirtualServices: %d, ConnectedEndpoints: %d", version, s.EDSUpdates,
+		"VirtualServices: %d, ConnectedEndpoints: %d", version, edsUpdates,
 		len(push.VirtualServiceConfigs), adsClientCount())
 	t0 := time.Now()
 
@@ -411,7 +414,7 @@ func (s *DiscoveryServer) edsIncremental(version string, push *model.PushContext
 	for k, v := range edsClusters {
 		_, _, hostname, _ := model.ParseSubsetKey(k)
 		s.mutex.RLock()
-		if s.EDSUpdates[string(hostname)] == nil {
+		if edsUpdates[string(hostname)] == nil {
 			// Cluster was not updated, skip recomputing.
 			continue
 		}
@@ -430,7 +433,7 @@ func (s *DiscoveryServer) edsIncremental(version string, push *model.PushContext
 	}
 	adsLog.Infof("Cluster init time %v %s", time.Since(t0), version)
 
-	s.startPush(version, push, false)
+	s.startPush(version, push, false, edsUpdates)
 }
 
 // EDSUpdate computes destination address membership across all clusters and networks.
@@ -451,8 +454,8 @@ func (s *DiscoveryServer) EDSUpdate(shard, serviceName string,
 	// 1. Find the 'per service' data
 	ep, f := s.EndpointShardsByService[serviceName]
 	if !f {
-		ep = ServiceShards{
-			Shards: map[string]*EndpointShard{},
+		ep = model.ServiceShards{
+			Shards: map[string]*model.EndpointShard{},
 			//AllEndpoints: []EndpointShard{},
 		}
 		s.EndpointShardsByService[serviceName] = ep
@@ -460,7 +463,7 @@ func (s *DiscoveryServer) EDSUpdate(shard, serviceName string,
 
 	// 2. Update data for the specific cluster. Each cluster gets independent
 	// updates containing the full list of endpoints for the service in that cluster.
-	ce := &EndpointShard{
+	ce := &model.EndpointShard{
 		Shard:   shard,
 		Entries: []*model.IstioEndpoint{},
 	}
@@ -469,9 +472,8 @@ func (s *DiscoveryServer) EDSUpdate(shard, serviceName string,
 		ce.Entries = append(ce.Entries, e)
 	}
 	ep.Shards[shard] = ce
-	s.EDSUpdates[serviceName] = &ep
+	s.Env.EDSUpdates[serviceName] = &ep
 
-	adsLog.Infof("EDS Entries: %s %s %v", shard, serviceName, entries)
 	return nil
 }
 
@@ -539,14 +541,30 @@ func connectionID(node string) string {
 // pushEds is pushing EDS updates for a single connection. Called the first time
 // a client connects, for incremental updates and for full periodic updates.
 func (s *DiscoveryServer) pushEds(push *model.PushContext, con *XdsConnection,
-	full bool) error {
+	full bool, edsUpdatedServices map[string]*model.ServiceShards) error {
 	resAny := []types.Any{}
 
 	emptyClusters := 0
 	endpoints := 0
 	empty := []string{}
 
+	updated := []string{}
+
 	for _, clusterName := range con.Clusters {
+		if edsPartial {
+			_, _, hostname, _ := model.ParseSubsetKey(clusterName)
+			s.mutex.RLock()
+			if edsUpdatedServices != nil && edsUpdatedServices[string(hostname)] == nil {
+				// Cluster was not updated, skip recomputing.
+				continue
+			}
+			s.mutex.RUnlock()
+			// for debug
+			if edsUpdatedServices != nil {
+				updated = append(updated, clusterName)
+			}
+		}
+
 		c := s.getEdsCluster(clusterName)
 		if c == nil {
 			adsLog.Errorf("cluster %s was nil skipping it.", clusterName)
@@ -582,8 +600,14 @@ func (s *DiscoveryServer) pushEds(push *model.PushContext, con *XdsConnection,
 	}
 	pushes.With(prometheus.Labels{"type": "eds"}).Add(1)
 
-	adsLog.Debugf("EDS: PUSH for %s clusters %d endpoints %d empty %d",
-		con.ConID, len(con.Clusters), endpoints, emptyClusters)
+	if full {
+		// TODO: switch back to debug
+		adsLog.Infof("EDS: PUSH for %s clusters %d endpoints %d empty %d",
+			con.ConID, len(con.Clusters), endpoints, emptyClusters)
+	} else {
+		adsLog.Infof("EDS: INC PUSH for %s clusters %d endpoints %d empty %d %v",
+			con.ConID, len(con.Clusters), endpoints, emptyClusters, updated)
+	}
 	return nil
 }
 
