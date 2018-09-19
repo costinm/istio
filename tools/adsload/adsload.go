@@ -78,7 +78,7 @@ func runClient(n int) {
 
 	for {
 		msg, err := c.Wait("", 15*time.Second)
-		if err == adsc.TimeoutError {
+		if err == adsc.ErrTimeout {
 			continue
 		}
 		log.Println("Received ", msg)
