@@ -58,7 +58,7 @@ var (
 )
 
 func main() {
- 	flag.Parse()
+	flag.Parse()
 
 	for i := 0; i < *clients; i++ {
 		n := i

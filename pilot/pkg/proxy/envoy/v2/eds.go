@@ -453,7 +453,7 @@ func (s *DiscoveryServer) edsIncremental(version string, push *model.PushContext
 }
 
 var (
-	errNewService = errors.New("new service")
+	errNewService        = errors.New("new service")
 	errNewServiceAccount = errors.New("service account change")
 )
 
