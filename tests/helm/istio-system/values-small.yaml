@@ -1,4 +1,4 @@
-# This is used to generate istio.yaml for a small stress/load test cluster.
+# This is used to generate istio.yaml for a small/medium stress/load test cluster.
 
 global:
   imagePullPolicy: Always
@@ -48,7 +48,7 @@ gateways:
       name: gateway
     replicas: 1
     autoscaleMin: 1
-    autoscaleMax: 2
+    autoscaleMax: 5
     resources:
       requests:
         cpu: 2000m
@@ -94,7 +94,7 @@ pilot:
     GODEBUG: gctrace=2
   resources:
     requests:
-      cpu: 1800m
+      cpu: 4800m
       memory: 2G
 
 ingress:
@@ -107,14 +107,14 @@ sidecar-injector:
   enabled: true
 
 grafana:
-  enabled: false
+  enabled: true
   #image: gcr.io/istio-release/grafana:release-1.0-20180720-00-11
 
 mixer:
   #image: gcr.io/istio-release/mixer:release-1.0-20180720-00-11
   resources:
     requests:
-      cpu: 800m
+      cpu: 3800m
       memory: 4G
 
 tracing:
@@ -123,17 +123,17 @@ tracing:
     enabled: true
 
 servicegraph:
-  enabled: false
+  enabled: true
 
 prometheus:
   enabled: true
 
 kiali:
-  enabled: false
+  enabled: true
   tag: latest
 
 certmanager:
-  enabled: false
+  enabled: true
   email: costin@webinf.info
   commonName: ingress.v10.istio.webinf.info
   certificates:

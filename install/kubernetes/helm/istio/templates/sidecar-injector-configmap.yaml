@@ -59,15 +59,6 @@ data:
           privileged: true
       {{ end }}
       containers:
-      {{- if .Values.global.proxy.envoyStatsd.enabled }}
-      - name: statsd
-        image: "docker.io/prom/statsd-exporter:v0.6.0"
-        imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
-        ports:
-        - containerPort: 9102
-        - containerPort: 9105
-          protocol: UDP
-      {{- end }}
       - name: istio-proxy
         image: {{ "[[ annotation .ObjectMeta `sidecar.istio.io/proxyImage` " }} "{{ .Values.global.hub }}/{{ .Values.global.proxy.image }}:{{ .Values.global.tag }}" {{ " ]]" }}
 {{ if ne .Values.global.proxy.stats.prometheusPort 0. }}
@@ -103,7 +94,7 @@ data:
         - {{ "[[ formatDuration .ProxyConfig.ConnectTimeout ]]" }}
       {{- if .Values.global.proxy.envoyStatsd.enabled }}
         - --statsdUdpAddress
-        - {{ "127.0.0.1:9105" }}
+        - {{ "[[ .ProxyConfig.StatsdUdpAddress ]]" }}
       {{- end }}
         - --proxyAdminPort
         - {{ "[[ .ProxyConfig.ProxyAdminPort ]]" }}
@@ -137,14 +128,14 @@ data:
             fieldRef:
               fieldPath: metadata.name
         - name: ISTIO_META_INTERCEPTION_MODE
-          value: {{ "[[ annotation .ObjectMeta `sidecar.istio.io/interceptionMode` .ProxyConfig.InterceptionMode ]]" }}
+          value: {{ "[[ or (index .ObjectMeta.Annotations \"sidecar.istio.io/interceptionMode\") .ProxyConfig.InterceptionMode.String ]]" }}
         {{ "[[ range $k,$v := .ObjectMeta.Annotations ]]" }}
         - name: ISTIO_META_{{ "[[ annotationEscape $k ]]" }}
-          value: {{ "[[ $v ]]" }}
+          value: "{{ "[[ $v ]]" }}"
         {{ "[[ end ]]" }}
         {{ "[[ range $k,$v := .ObjectMeta.Labels ]]" }}
         - name: ISTIO_META_{{ "[[ $k ]]" }}
-          value: {{ "[[ $v ]]" }}
+          value: "{{ "[[ $v ]]" }}"
         {{ "[[ end ]]" }}
         imagePullPolicy: {{ .Values.global.imagePullPolicy }}
         {{ "[[ if (ne (annotation .ObjectMeta `status.sidecar.istio.io/port` " }} {{ .Values.global.proxy.statusPort }} {{ ") \"0\") ]]" }}

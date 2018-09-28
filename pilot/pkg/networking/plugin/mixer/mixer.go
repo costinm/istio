@@ -56,14 +56,18 @@ func NewPlugin() plugin.Plugin {
 	return mixerplugin{}
 }
 
+func disabled(n *model.Proxy) bool {
+	checkDisabled := n.Metadata["sidecar.istio.io_policy"] == off
+	reportDisabled := n.Metadata["sidecar.istio.io_telemetry"] == off
+	return checkDisabled && reportDisabled
+}
+
 // OnOutboundListener implements the Callbacks interface method.
 func (mixerplugin) OnOutboundListener(in *plugin.InputParams, mutable *plugin.MutableObjects) error {
 	if in.Env.Mesh.MixerCheckServer == "" && in.Env.Mesh.MixerReportServer == "" {
 		return nil
 	}
-	checkDisabled := in.Node.Metadata["sidecar.istio.io_policy"] == off
-	reportDisabled := in.Node.Metadata["sidecar.istio.io_telemetry"] == off
-	if checkDisabled && reportDisabled {
+	if disabled(in.Node) {
 		return nil
 	}
 
@@ -97,9 +101,7 @@ func (mixerplugin) OnInboundListener(in *plugin.InputParams, mutable *plugin.Mut
 	if in.Env.Mesh.MixerCheckServer == "" && in.Env.Mesh.MixerReportServer == "" {
 		return nil
 	}
-	checkDisabled := in.Node.Metadata["sidecar.istio.io_policy"] == off
-	reportDisabled := in.Node.Metadata["sidecar.istio.io_telemetry"] == off
-	if checkDisabled && reportDisabled {
+	if disabled(in.Node) {
 		return nil
 	}
 
@@ -155,9 +157,7 @@ func (mixerplugin) OnInboundCluster(env *model.Environment, node *model.Proxy, p
 
 // OnOutboundRouteConfiguration implements the Plugin interface method.
 func (mixerplugin) OnOutboundRouteConfiguration(in *plugin.InputParams, routeConfiguration *xdsapi.RouteConfiguration) {
-	checkDisabled := in.Node.Metadata["sidecar.istio.io_policy"] == off
-	reportDisabled := in.Node.Metadata["sidecar.istio.io_telemetry"] == off
-	if checkDisabled && reportDisabled {
+	if disabled(in.Node) {
 		return
 	}
 	for i := 0; i < len(routeConfiguration.VirtualHosts); i++ {
@@ -171,9 +171,7 @@ func (mixerplugin) OnOutboundRouteConfiguration(in *plugin.InputParams, routeCon
 
 // OnInboundRouteConfiguration implements the Plugin interface method.
 func (mixerplugin) OnInboundRouteConfiguration(in *plugin.InputParams, routeConfiguration *xdsapi.RouteConfiguration) {
-	checkDisabled := in.Node.Metadata["sidecar.istio.io_policy"] == off
-	reportDisabled := in.Node.Metadata["sidecar.istio.io_telemetry"] == off
-	if checkDisabled && reportDisabled {
+	if disabled(in.Node) {
 		return
 	}
 	switch in.ListenerProtocol {
@@ -386,7 +384,7 @@ func disableClientPolicyChecks(mesh *meshconfig.MeshConfig, node *model.Proxy) b
 	if mesh.DisablePolicyChecks {
 		return true
 	}
-	if node.Metadata["sidecar.istio.io_policy"] == off {
+	if node.Metadata["sidecar.istio.io.policy"] == off {
 		return true
 	}
 
