@@ -18,7 +18,6 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
-	"istio.io/istio/tests/util"
 	"log"
 	"net/http"
 	"runtime"
@@ -27,6 +26,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"istio.io/istio/tests/util"
 
 	_ "net/http/pprof"
 
@@ -252,7 +253,7 @@ func edsUpdateInc(server *bootstrap.Server, adsc *adsc.ADSC, t *testing.T) {
 // This test includes a 'bad client' regression test, which fails to read on the
 // stream.
 func multipleRequest(server *bootstrap.Server, inc bool, nclients,
-		nPushes int, to time.Duration, meta map[string]string, t *testing.T) {
+	nPushes int, to time.Duration, meta map[string]string, t *testing.T) {
 	wgConnect := &sync.WaitGroup{}
 	wg := &sync.WaitGroup{}
 	errChan := make(chan error, nclients)

@@ -15,87 +15,75 @@
 package kube
 
 import (
+	"k8s.io/client-go/kubernetes"
 	"reflect"
 	"testing"
 
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/fake"
 
 	"istio.io/istio/pilot/pkg/model"
 )
 
+// Create a set of realistic test pod. This can be used in multiple tests, to
+// avoid duplicating creation. It can be used with the fake or standalone apiserver.
+func initTestPods(ki kubernetes.Interface) {
+
+}
+
 func TestPodCache(t *testing.T) {
+	t.Run("localApiserver", func(t *testing.T) {
+		c, fx := newLocalController(t)
+		defer c.Stop()
+		testPodCache(t, c, fx)
+	})
+	t.Run("fakeApiserver", func(t *testing.T) {
+		c, fx := newFakeController(t)
+		defer c.Stop()
+		testPodCache(t, c, fx)
+	})
+}
 
-	testCases := []struct {
-		name         string
-		pods         []*v1.Pod
-		keys         map[string]string
-		wantLabels   map[string]model.Labels
-		wantNotFound bool
-	}{
-		{
-			name: "Should find all addresses in the map",
-			pods: []*v1.Pod{
-				generatePod("128.0.0.1", "pod1", "nsA", "", "", map[string]string{"app": "test-app"}, map[string]string{}),
-				generatePod("128.0.0.2", "pod2", "nsA", "", "", map[string]string{"app": "prod-app-1"}, map[string]string{}),
-				generatePod("128.0.0.3", "pod3", "nsB", "", "", map[string]string{"app": "prod-app-2"}, map[string]string{}),
-			},
-			wantLabels: map[string]model.Labels{
-				"128.0.0.1": {"app": "test-app"},
-				"128.0.0.2": {"app": "prod-app-1"},
-				"128.0.0.3": {"app": "prod-app-2"},
-			},
-		},
-		{
-			name:         "Should fail if addr not in keys",
-			wantLabels:   map[string]model.Labels{"128.0.0.4": nil},
-			wantNotFound: true,
-		},
+func testPodCache(t *testing.T, c *Controller, fx *FakeXdsUpdater) {
+	pods:= []*v1.Pod{
+		generatePod("128.0.0.1", "pod1", "nsA", "", "", map[string]string{"app": "test-app"}, map[string]string{}),
+		generatePod("128.0.0.2", "pod2", "nsA", "", "", map[string]string{"app": "prod-app-1"}, map[string]string{}),
+		generatePod("128.0.0.3", "pod3", "nsB", "", "", map[string]string{"app": "prod-app-2"}, map[string]string{}),
 	}
-	fx := NewFakeXDS()
-	for _, c := range testCases {
-		t.Run(c.name, func(t *testing.T) {
-			clientSet := fake.NewSimpleClientset()
-			controller := NewController(clientSet, ControllerOptions{
-				WatchedNamespace: "",
-				ResyncPeriod:     resync,
-				DomainSuffix:     domainSuffix,
-				XDSUpdater:       fx,
-			})
-			stp := make(chan struct{})
-			go controller.Run(stp)
 
-			// Populate podCache
-			for _, pod := range c.pods {
-				_, err := clientSet.CoreV1().Pods(pod.Namespace).Create(pod)
-				//if err := controller.pods.informer.GetStore().Add(pod); err != nil {
-				if err != nil {
-					t.Errorf("Cannot create %s in namespace %s (error: %v)", pod.ObjectMeta.Name, pod.ObjectMeta.Namespace, err)
-				}
-				ev := <- fx.Events
-				if ev.Id != pod.Status.PodIP {
-					t.Error("Workload event expected ", pod.Status.PodIP, "got", ev.Id)
-				}
-			}
+	// Populate podCache
+	for _, pod := range pods {
+		_, err := c.client.CoreV1().Pods(pod.Namespace).Create(pod)
+		//if err := controller.pods.informer.GetStore().Add(pod); err != nil {
+		if err != nil {
+			t.Errorf("Cannot create %s in namespace %s (error: %v)", pod.ObjectMeta.Name, pod.ObjectMeta.Namespace, err)
+		}
+		ev := <-fx.Events
+		if ev.Id != pod.Status.PodIP {
+			t.Error("Workload event expected ", pod.Status.PodIP, "got", ev.Id)
+		}
+	}
 
-			// No need to populate key or touch internals - the events create the proper
-			// struct
+	// Verify podCache
+	wantLabels:= map[string]model.Labels{
+		"128.0.0.1": {"app": "test-app"},
+		"128.0.0.2": {"app": "prod-app-1"},
+		"128.0.0.3": {"app": "prod-app-2"},
+	}
+	for addr, wantTag := range wantLabels {
+		tag, found := c.pods.labelsByIP(addr)
+		if !found {
+			t.Error("Not found ", addr)
+		}
+		if !reflect.DeepEqual(wantTag, tag) {
+			t.Errorf("Expected %v got %v", wantTag, tag)
+		}
+	}
 
-			// Verify podCache
-			for addr, wantTag := range c.wantLabels {
-				tag, found := controller.pods.labelsByIP(addr)
-				if !reflect.DeepEqual(wantTag, tag) {
-					t.Errorf("Expected %v got %v", wantTag, tag)
-				}
-				if c.wantNotFound {
-					if found {
-						t.Error("Expected not found but was found")
-					}
-				}
-			}
-
-		})
+	// Former 'wantNotFound' test. A pod not in the cache results in found = false
+	_, found := c.pods.labelsByIP("128.0.0.4")
+	if found {
+		t.Error("Expected not found but was found")
 	}
 }
 

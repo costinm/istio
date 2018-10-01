@@ -52,9 +52,7 @@ const (
 	resync      = 1 * time.Second
 )
 
-
 type FakeUpdater struct {
-
 }
 
 func NewFakeUpdater() *FakeUpdater {
@@ -80,15 +78,15 @@ type XdsEvent struct {
 	Id string
 }
 
+// NewFakeXDS creates a XdsUpdater reporting events via a channel.
 func NewFakeXDS() *FakeXdsUpdater {
 	return &FakeXdsUpdater{
 		Events: make(chan XdsEvent),
-
 	}
 }
 
 func (fx *FakeXdsUpdater) EDSUpdate(shard, hostname string, entry []*model.IstioEndpoint) error {
-	fx.Events <- XdsEvent{Type:"eds", Id: hostname}
+	fx.Events <- XdsEvent{Type: "eds", Id: hostname}
 	return nil
 }
 
@@ -101,10 +99,8 @@ func (*FakeXdsUpdater) SvcUpdate(shard, hostname string, ports map[string]uint32
 }
 
 func (fx *FakeXdsUpdater) WorkloadUpdate(id string, labels map[string]string, annotations map[string]string) {
-	fx.Events <- XdsEvent{Type:"workload", Id: id}
+	fx.Events <- XdsEvent{Type: "workload", Id: id}
 }
-
-
 
 // Uses local or remote k8s cluster - requires KUBECONFIG or ~/.kube/config
 // Will create a temp namespace
@@ -117,6 +113,35 @@ func TestServices(t *testing.T) {
 		cl := fake.NewSimpleClientset()
 		testServices(t, cl)
 	})
+}
+
+func newLocalController(t *testing.T) (*Controller, *FakeXdsUpdater) {
+	fx := NewFakeXDS()
+	ki := makeClient(t)
+	ctl := NewController(ki, ControllerOptions{
+		WatchedNamespace: "",
+		ResyncPeriod:     resync,
+		DomainSuffix:     domainSuffix,
+		XDSUpdater:       fx,
+		ConfigUpdater:    NewFakeUpdater(),
+		stop: make(chan struct{}),
+	})
+	go ctl.Run(ctl.stop)
+	return ctl, fx
+}
+
+func newFakeController(t *testing.T) (*Controller, *FakeXdsUpdater) {
+	fx := NewFakeXDS()
+	clientSet := fake.NewSimpleClientset()
+	c := NewController(clientSet, ControllerOptions{
+		WatchedNamespace: "", // tests create resources in multiple ns
+		ResyncPeriod:     resync,
+		DomainSuffix:     domainSuffix,
+		ConfigUpdater:    NewFakeUpdater(),
+		stop: make(chan struct{}),
+	})
+	go c.Run(c.stop)
+	return c, fx
 }
 
 // The test can be run against local api server or fake apiserver.
@@ -213,8 +238,8 @@ func makeService(n, ns string, cl kubernetes.Interface, t *testing.T) {
 		Spec: v1.ServiceSpec{
 			Ports: []v1.ServicePort{
 				{
-					Port: 80,
-					Name: "http-example",
+					Port:     80,
+					Name:     "http-example",
 					Protocol: v1.ProtocolTCP, // Not added automatically by fake
 				},
 			},
@@ -227,8 +252,8 @@ func makeService(n, ns string, cl kubernetes.Interface, t *testing.T) {
 }
 
 func TestController_getPodAZ(t *testing.T) {
-	pod1 := generatePod("128.0.1.1","pod1", "nsA", "", "node1", map[string]string{"app": "prod-app"}, map[string]string{})
-	pod2 := generatePod("128.0.1.2","pod2", "nsB", "", "node2", map[string]string{"app": "prod-app"}, map[string]string{})
+	pod1 := generatePod("128.0.1.1", "pod1", "nsA", "", "node1", map[string]string{"app": "prod-app"}, map[string]string{})
+	pod2 := generatePod("128.0.1.2", "pod2", "nsB", "", "node2", map[string]string{"app": "prod-app"}, map[string]string{})
 	testCases := []struct {
 		name   string
 		pods   []*v1.Pod
@@ -370,13 +395,13 @@ func TestController_GetIstioServiceAccounts(t *testing.T) {
 	canonicalSaOnVM := "acctvm@gserviceaccount.com"
 
 	pods := []*v1.Pod{
-		generatePod("128.0.1.3","pod1", "nsA", sa1, "node1", map[string]string{"app": "test-app"}, map[string]string{}),
-		generatePod("128.0.1.4","pod2", "nsA", sa2, "node2", map[string]string{"app": "prod-app"}, map[string]string{}),
-		generatePod("128.0.1.5","pod3", "nsB", sa3, "node1", map[string]string{"app": "prod-app"}, map[string]string{}),
+		generatePod("128.0.1.3", "pod1", "nsA", sa1, "node1", map[string]string{"app": "test-app"}, map[string]string{}),
+		generatePod("128.0.1.4", "pod2", "nsA", sa2, "node2", map[string]string{"app": "prod-app"}, map[string]string{}),
+		generatePod("128.0.1.5", "pod3", "nsB", sa3, "node1", map[string]string{"app": "prod-app"}, map[string]string{}),
 	}
 	addPods(t, controller, pods...)
-	for i := 0 ; i < 3 ; i++ {
-		<- fx.Events
+	for i := 0; i < 3; i++ {
+		<-fx.Events
 	}
 	nodes := []*v1.Node{
 		generateNode("node1", map[string]string{NodeZoneLabel: "az1"}),
@@ -403,8 +428,8 @@ func TestController_GetIstioServiceAccounts(t *testing.T) {
 	portNames := []string{"test-port"}
 	createEndpoints(controller, "svc1", "nsA", portNames, svc1Ips, t)
 	createEndpoints(controller, "svc2", "nsA", portNames, svc2Ips, t)
-	for i := 0 ; i < 2 ; i++ {
-		<- fx.Events
+	for i := 0; i < 2; i++ {
+		<-fx.Events
 	}
 	hostname := serviceHostname("svc1", "nsA", domainSuffix)
 	sa := controller.GetIstioServiceAccounts(hostname, []string{"test-port"})
@@ -471,7 +496,7 @@ func TestWorkloadHealthCheckInfoPrometheusScrape(t *testing.T) {
 	controller := makeFakeKubeAPIController()
 
 	pods := []*v1.Pod{
-		generatePod("128.0.1.6","pod1", "nsA", "", "node1", map[string]string{"app": "test-app"},
+		generatePod("128.0.1.6", "pod1", "nsA", "", "node1", map[string]string{"app": "test-app"},
 			map[string]string{PrometheusScrape: "true"}),
 	}
 	addPods(t, controller, pods...)
@@ -495,7 +520,7 @@ func TestWorkloadHealthCheckInfoPrometheusPath(t *testing.T) {
 	controller := makeFakeKubeAPIController()
 
 	pods := []*v1.Pod{
-		generatePod("128.0.1.7","pod1", "nsA", "", "node1", map[string]string{"app": "test-app"},
+		generatePod("128.0.1.7", "pod1", "nsA", "", "node1", map[string]string{"app": "test-app"},
 			map[string]string{PrometheusScrape: "true", PrometheusPath: "/other"}),
 	}
 	addPods(t, controller, pods...)
@@ -519,7 +544,7 @@ func TestWorkloadHealthCheckInfoPrometheusPort(t *testing.T) {
 	controller := makeFakeKubeAPIController()
 
 	pods := []*v1.Pod{
-		generatePod("128.0.1.8","pod1", "nsA", "", "node1", map[string]string{"app": "test-app"},
+		generatePod("128.0.1.8", "pod1", "nsA", "", "node1", map[string]string{"app": "test-app"},
 			map[string]string{PrometheusScrape: "true", PrometheusPort: "3210"}),
 	}
 	addPods(t, controller, pods...)
@@ -687,4 +712,3 @@ func addNodes(t *testing.T, controller *Controller, nodes ...*v1.Node) {
 		}
 	}
 }
-

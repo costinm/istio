@@ -51,6 +51,7 @@ func newPodCache(ch cacheHandler, c *Controller) *PodCache {
 	})
 	return out
 }
+
 // event updates the IP-based index (pc.keys).
 func (pc *PodCache) event(obj interface{}, ev model.Event) error {
 	pc.rwMu.Lock()

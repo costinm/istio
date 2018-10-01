@@ -1,17 +1,19 @@
 package kube_test
 
 import (
-	"istio.io/istio/tests/util"
 	"testing"
 	"time"
+
+	"istio.io/istio/tests/util"
+
+	"k8s.io/api/core/v1"
+	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 
 	"istio.io/istio/pilot/pkg/serviceregistry"
 	"istio.io/istio/pilot/pkg/serviceregistry/aggregate"
 	"istio.io/istio/pilot/pkg/serviceregistry/kube"
 	"istio.io/istio/tests/k8s"
-	"k8s.io/api/core/v1"
-	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
 )
 
 // Test EDS incremental against real local apiserver.

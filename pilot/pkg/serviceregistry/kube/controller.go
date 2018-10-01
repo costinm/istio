@@ -85,6 +85,8 @@ type ControllerOptions struct {
 
 	// ConfigUpdater is used to request global config updates.
 	ConfigUpdater model.ConfigUpdater
+
+	stop chan struct{}
 }
 
 // Controller is a collection of synchronized resource watchers
@@ -112,6 +114,8 @@ type Controller struct {
 
 	// ConfigUpdater is used to request global config updates.
 	ConfigUpdater model.ConfigUpdater
+
+	stop chan struct{}
 }
 
 type cacheHandler struct {
@@ -296,6 +300,12 @@ func (c *Controller) Run(stop <-chan struct{}) {
 
 	<-stop
 	log.Infof("Controller terminated")
+}
+
+func (c *Controller) Stop() {
+	if c.stop != nil {
+		c.stop <- struct{}{}
+	}
 }
 
 // Services implements a service catalog operation
@@ -795,7 +805,9 @@ func (c *Controller) updateEDS(ep *v1.Endpoints) {
 			pod, exists := c.pods.getPodByIP(ea.IP)
 			if !exists {
 				log.Warnf("Endpoint without pod %s %v", ea.IP, ep)
-				c.Env.PushContext.Add(model.EndpointNoPod, string(hostname), nil, ea.IP)
+				if c.Env != nil {
+					c.Env.PushContext.Add(model.EndpointNoPod, string(hostname), nil, ea.IP)
+				}
 				// Request a global config update - after debounce we may find an endpoint.
 
 				c.ConfigUpdater.ConfigUpdate(true)

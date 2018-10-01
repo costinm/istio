@@ -30,7 +30,7 @@ func Kubeconfig(relpath string) string {
 
 	// For Bazel sandbox we search a different location:
 	// Attempt to use the relpath, using the linked file - pilot/kube/platform/config
-		kubeconfig, _ = os.Getwd()
+	kubeconfig, _ = os.Getwd()
 	kubeconfig = kubeconfig + relpath
 	if _, err := os.Stat(kubeconfig); err == nil {
 		return kubeconfig
