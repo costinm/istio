@@ -250,19 +250,25 @@ func (c *Controller) createEDSInformer(
 			// TODO: filtering functions to skip over un-referenced resources (perf)
 			AddFunc: func(obj interface{}) {
 				k8sEvents.With(prometheus.Labels{"type": otype, "event": "add"}).Add(1)
-				c.queue.Push(Task{handler: handler.Apply, obj: obj, event: model.EventAdd})
+				c.updateEDS(obj.(*v1.Endpoints))
+				//c.queue.Push(Task{handler: handler.Apply, obj: obj, event: model.EventAdd})
 			},
 			UpdateFunc: func(old, cur interface{}) {
 				if !reflect.DeepEqual(old, cur) {
 					k8sEvents.With(prometheus.Labels{"type": otype, "event": "update"}).Add(1)
-					c.queue.Push(Task{handler: handler.Apply, obj: cur, event: model.EventUpdate})
+					c.updateEDS(cur.(*v1.Endpoints))
+					//c.queue.Push(Task{handler: handler.Apply, obj: cur, event: model.EventUpdate})
 				} else {
 					k8sEvents.With(prometheus.Labels{"type": otype, "event": "updateSame"}).Add(1)
 				}
 			},
 			DeleteFunc: func(obj interface{}) {
 				k8sEvents.With(prometheus.Labels{"type": otype, "event": "add"}).Add(1)
-				c.queue.Push(Task{handler: handler.Apply, obj: obj, event: model.EventDelete})
+				// Deleting the endpoints results in an empty set from EDS perspective - only
+				// deleting the service should delete the resources. The full sync replaces the
+				// maps.
+				c.updateEDS(obj.(*v1.Endpoints))
+				//c.queue.Push(Task{handler: handler.Apply, obj: obj, event: model.EventDelete})
 			},
 		})
 
@@ -752,7 +758,7 @@ func (c *Controller) AppendInstanceHandler(f func(*model.ServiceInstance, model.
 		return nil
 	}
 	c.endpoints.handler.Append(func(obj interface{}, event model.Event) error {
-		ep := *obj.(*v1.Endpoints)
+		ep := obj.(*v1.Endpoints)
 
 		// Do not handle "kube-system" endpoints
 		if ep.Namespace == meta_v1.NamespaceSystem {
@@ -778,7 +784,7 @@ func (c *Controller) AppendInstanceHandler(f func(*model.ServiceInstance, model.
 
 // endpoints2ServiceEntry converts the endpoints to a minimal service entry object.
 // TODO: we may generate directly the load assignment, saving one conversion
-func (c *Controller) updateEDS(ep v1.Endpoints) {
+func (c *Controller) updateEDS(ep *v1.Endpoints) {
 	hostname := serviceHostname(ep.Name, ep.Namespace, c.domainSuffix)
 
 	endpoints := []*model.IstioEndpoint{}

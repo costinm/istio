@@ -228,6 +228,7 @@ func (c *Controller) addMemberCluster(secretName string, s *corev1.Secret) {
 			c.cs.rc[clusterID] = &RemoteCluster{}
 			c.cs.rc[clusterID].Client = clientConfig
 			c.cs.rc[clusterID].FromSecret = secretName
+
 			client, _ := kube.CreateInterfaceFromClusterConfig(clientConfig)
 			kubectl := kube.NewController(client, kube.ControllerOptions{
 				WatchedNamespace: c.watchedNamespace,
@@ -250,6 +251,7 @@ func (c *Controller) addMemberCluster(secretName string, s *corev1.Secret) {
 			_ = kubectl.AppendServiceHandler(func(*model.Service, model.Event) { c.configUpdater.ConfigUpdate(true) })
 			_ = kubectl.AppendInstanceHandler(func(*model.ServiceInstance, model.Event) { c.configUpdater.ConfigUpdate(true) })
 			go kubectl.Run(stopCh)
+
 		} else {
 			log.Infof("Cluster %s in the secret %s in namespace %s already exists",
 				clusterID, secretName, s.ObjectMeta.Namespace)

@@ -37,14 +37,9 @@ func TestPodCache(t *testing.T) {
 		{
 			name: "Should find all addresses in the map",
 			pods: []*v1.Pod{
-				generatePod("pod1", "nsA", "", "", map[string]string{"app": "test-app"}, map[string]string{}),
-				generatePod("pod2", "nsA", "", "", map[string]string{"app": "prod-app-1"}, map[string]string{}),
-				generatePod("pod3", "nsB", "", "", map[string]string{"app": "prod-app-2"}, map[string]string{}),
-			},
-			keys: map[string]string{
-				"128.0.0.1": "nsA/pod1",
-				"128.0.0.2": "nsA/pod2",
-				"128.0.0.3": "nsB/pod3",
+				generatePod("128.0.0.1", "pod1", "nsA", "", "", map[string]string{"app": "test-app"}, map[string]string{}),
+				generatePod("128.0.0.2", "pod2", "nsA", "", "", map[string]string{"app": "prod-app-1"}, map[string]string{}),
+				generatePod("128.0.0.3", "pod3", "nsB", "", "", map[string]string{"app": "prod-app-2"}, map[string]string{}),
 			},
 			wantLabels: map[string]model.Labels{
 				"128.0.0.1": {"app": "test-app"},
@@ -54,34 +49,38 @@ func TestPodCache(t *testing.T) {
 		},
 		{
 			name:         "Should fail if addr not in keys",
-			wantLabels:   map[string]model.Labels{"128.0.0.1": nil},
-			wantNotFound: true,
-		},
-		{
-			name:         "Should fail if addr in keys but pod not in cache",
-			wantLabels:   map[string]model.Labels{"128.0.0.1": nil},
-			keys:         map[string]string{"128.0.0.1": "nsA/pod1"},
+			wantLabels:   map[string]model.Labels{"128.0.0.4": nil},
 			wantNotFound: true,
 		},
 	}
+	fx := NewFakeXDS()
 	for _, c := range testCases {
 		t.Run(c.name, func(t *testing.T) {
 			clientSet := fake.NewSimpleClientset()
 			controller := NewController(clientSet, ControllerOptions{
-				WatchedNamespace: "default",
+				WatchedNamespace: "",
 				ResyncPeriod:     resync,
 				DomainSuffix:     domainSuffix,
+				XDSUpdater:       fx,
 			})
+			stp := make(chan struct{})
+			go controller.Run(stp)
 
 			// Populate podCache
 			for _, pod := range c.pods {
-				if err := controller.pods.informer.GetStore().Add(pod); err != nil {
+				_, err := clientSet.CoreV1().Pods(pod.Namespace).Create(pod)
+				//if err := controller.pods.informer.GetStore().Add(pod); err != nil {
+				if err != nil {
 					t.Errorf("Cannot create %s in namespace %s (error: %v)", pod.ObjectMeta.Name, pod.ObjectMeta.Namespace, err)
+				}
+				ev := <- fx.Events
+				if ev.Id != pod.Status.PodIP {
+					t.Error("Workload event expected ", pod.Status.PodIP, "got", ev.Id)
 				}
 			}
 
-			// Populate key
-			controller.pods.keys = c.keys
+			// No need to populate key or touch internals - the events create the proper
+			// struct
 
 			// Verify podCache
 			for addr, wantTag := range c.wantLabels {
@@ -98,17 +97,15 @@ func TestPodCache(t *testing.T) {
 
 		})
 	}
-
 }
 
+// Checks that events from the watcher create the proper internal structures
+// Deprecated: the current structs are not efficient.
 func TestPodCacheEvents(t *testing.T) {
 	handler := &ChainHandler{}
 	cache := newPodCache(cacheHandler{handler: handler}, nil)
-	if len(handler.funcs) != 1 {
-		t.Fatal("failed to register handlers")
-	}
 
-	f := handler.funcs[0]
+	f := cache.event
 
 	ns := "default"
 	ip := "172.0.3.35"
