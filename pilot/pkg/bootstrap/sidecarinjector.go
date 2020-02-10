@@ -81,10 +81,12 @@ func (s *Server) initSidecarInjector(args *PilotArgs) error {
 	// This requires RBAC permissions - a low-priv Istiod should not attempt to patch but rely on
 	// operator or CI/CD
 	if injectionWebhookConfigName.Get() != "" {
-		s.leaderElection.AddRunFunction(func(stop <-chan struct{}) {
+		log.Infoa("Patching webhook ", injectionWebhookConfigName.Get())
+		s.addStartFunc(func(stop <-chan struct{}) error {
 			if err := s.patchCertLoop(s.kubeClient, stop); err != nil {
 				log.Errorf("failed to start patch cert loop: %v", err)
 			}
+			return nil
 		})
 	}
 	s.injectionWebhook = wh
@@ -117,6 +119,7 @@ func (s *Server) patchCertLoop(client kubernetes.Interface, stopCh <-chan struct
 		retry = true
 	}
 
+	log.Infoa("Initial patch ", injectionWebhookConfigName.Get())
 	shouldPatch := make(chan struct{})
 
 	watchlist := cache.NewListWatchFromClient(
