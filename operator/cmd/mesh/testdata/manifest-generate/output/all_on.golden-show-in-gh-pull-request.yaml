@@ -6884,6 +6884,9 @@ spec:
           requests:
             cpu: 10m
         securityContext:
+          capabilities:
+            drop:
+            - ALL
           runAsGroup: 1337
           runAsNonRoot: true
           runAsUser: 1337
@@ -7115,9 +7118,6 @@ spec:
           - name: ISTIO_META_ROUTER_MODE
             value: sni-dnat
           
-          - name: ISTIO_METAJSON_LABELS
-            value: |
-              {"app":"istio-egressgateway","istio":"egressgateway"}
           - name: ISTIO_META_CLUSTER_ID
             value: "Kubernetes"
           volumeMounts:
@@ -7126,6 +7126,8 @@ spec:
           - name: istio-token
             mountPath: /var/run/secrets/tokens
             readOnly: true
+          - name: podinfo
+            mountPath: /etc/istio/pod
           - name: egressgateway-certs
             mountPath: "/etc/istio/egressgateway-certs"
             readOnly: true
@@ -7136,6 +7138,15 @@ spec:
       - name: citadel-ca-cert
         configMap:
           name: istio-ca-root-cert
+      - name: podinfo
+        downwardAPI:
+          items:
+            - path: "labels"
+              fieldRef:
+                fieldPath: metadata.labels
+            - path: "annotations"
+              fieldRef:
+                fieldPath: metadata.annotations
       - name: istio-token
         projected:
           sources:
@@ -7615,8 +7626,6 @@ spec:
         - --enable-reconcileWebhookConfiguration=false
         - --enable-server=true
         - --deployment-namespace=istio-system
-        - --validation-webhook-config-file
-        - /etc/config/validatingwebhookconfiguration.yaml
         - --monitoringPort=15014
         - --validation-port=9443
         - --log_output_level=default:info
@@ -7649,13 +7658,13 @@ spec:
           requests:
             cpu: 100m
         securityContext:
+          capabilities:
+            drop:
+            - ALL
           runAsGroup: 1337
           runAsNonRoot: true
           runAsUser: 1337
         volumeMounts:
-        - mountPath: /etc/config
-          name: config
-          readOnly: true
         - mountPath: /etc/mesh-config
           name: mesh-config
           readOnly: true
@@ -7708,9 +7717,6 @@ spec:
       - configMap:
           name: galley-envoy-config
         name: envoy-config
-      - configMap:
-          name: istio-galley-configuration
-        name: config
       - configMap:
           name: istio-mesh-galley
         name: mesh-config
@@ -7966,9 +7972,6 @@ spec:
           - name: ISTIO_META_ROUTER_MODE
             value: sni-dnat
           
-          - name: ISTIO_METAJSON_LABELS
-            value: |
-              {"app":"istio-ingressgateway","istio":"ingressgateway"}
           - name: ISTIO_META_CLUSTER_ID
             value: "Kubernetes"
           volumeMounts:
@@ -7979,6 +7982,8 @@ spec:
             readOnly: true
           - name: ingressgatewaysdsudspath
             mountPath: /var/run/ingress_gateway
+          - name: podinfo
+            mountPath: /etc/istio/pod
           - name: ingressgateway-certs
             mountPath: "/etc/istio/ingressgateway-certs"
             readOnly: true
@@ -7989,6 +7994,15 @@ spec:
       - name: citadel-ca-cert
         configMap:
           name: istio-ca-root-cert
+      - name: podinfo
+        downwardAPI:
+          items:
+            - path: "labels"
+              fieldRef:
+                fieldPath: metadata.labels
+            - path: "annotations"
+              fieldRef:
+                fieldPath: metadata.annotations
       - name: ingressgatewaysdsudspath
         emptyDir: {}
       - name: istio-token
@@ -8199,10 +8213,10 @@ spec:
 apiVersion: autoscaling/v2beta1
 kind: HorizontalPodAutoscaler
 metadata:
-  name: istio-pilot
+  name: istiod
   namespace: istio-system
   labels:
-    app: pilot
+    app: istiod
     release: istio
 spec:
   maxReplicas: 5
@@ -8267,13 +8281,9 @@ kind: ClusterRole
 metadata:
   name: istiod-istio-system
   labels:
-    app: pilot
+    app: istiod
     release: istio
 rules:
-  # Remove permissions to reconcile webhook configuration. This address the downgrade case
-  # where istiod will be uninstalled. Removing the permissions reduces
-  # the likelihood that istiod will reconcile something it shouldn't.
-
   # sidecar injection controller
   - apiGroups: ["admissionregistration.k8s.io"]
     resources: ["mutatingwebhookconfigurations"]
@@ -8282,18 +8292,7 @@ rules:
   # configuration validation webhook controller
   - apiGroups: ["admissionregistration.k8s.io"]
     resources: ["validatingwebhookconfigurations"]
-    verbs: ["*"]
-    # required to set ownerRef on istiod clusterrole.
-  - apiGroups: ["rbac.authorization.k8s.io"]
-    resources: ["clusterroles/finalizers"]
-    resourceNames:
-    - istiod-istio-system
-    verbs: ["update"]
-  - apiGroups: ["rbac.authorization.k8s.io"]
-    resources: ["clusterroles"]
-    resourceNames:
-    - istiod-istio-system
-    verbs: ["get"]
+    verbs: ["get", "list", "watch", "update"]
 
   # istio configuration
   - apiGroups: ["config.istio.io", "rbac.istio.io", "security.istio.io", "networking.istio.io", "authentication.istio.io"]
@@ -8324,8 +8323,7 @@ rules:
     resources: ["ingresses/status"]
     verbs: ["*"]
 
-  # Pilot, injector - not clear why cluster wide.
-  # TODO: remove, too broad permission, should be namespace only
+  # required for CA's namespace controller
   - apiGroups: [""]
     resources: ["configmaps"]
     verbs: ["create", "get", "list", "watch", "update"]
@@ -8341,12 +8339,6 @@ rules:
   - apiGroups: ["authentication.k8s.io"]
     resources: ["tokenreviews"]
     verbs: ["create"]
-
-  # Citadel subset
-  # TODO: remove, namespace only
-  - apiGroups: [""]
-    resources: ["configmaps"]
-    verbs: ["create", "get", "update"]
 
   # TODO: remove, no longer needed at cluster
   - apiGroups: [""]
@@ -8371,7 +8363,7 @@ roleRef:
   name: istio-pilot-istio-system
 subjects:
   - kind: ServiceAccount
-    name: istio-pilot-service-account
+    name: istiod-service-account
     namespace: istio-system
 ---
 
@@ -8379,9 +8371,9 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: istiod-pilot-istio-system
+  name: istiod-istio-system
   labels:
-    app: pilot
+    app: istiod
     release: istio
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -8389,54 +8381,8 @@ roleRef:
   name: istiod-istio-system
 subjects:
   - kind: ServiceAccount
-    name: istio-pilot-service-account
+    name: istiod-service-account
     namespace: istio-system
----
-
-
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: istio-validation
-  namespace: istio-system
-  labels:
-    release: istio
-data:
-  config: |-    
-    apiVersion: admissionregistration.k8s.io/v1beta1
-    kind: ValidatingWebhookConfiguration
-    metadata:
-      name: istiod-istio-system
-      namespace: istio-system
-      labels:
-        app: istiod
-        release: istio
-        istio: istiod
-    webhooks:
-      - name: validation.istio.io
-        clientConfig:
-          service:
-            name: istiod
-            namespace: istio-system
-            path: "/validate"
-            port: 443
-          caBundle: ""
-        rules:
-          - operations:
-            - CREATE
-            - UPDATE
-            apiGroups:
-            - config.istio.io
-            - rbac.istio.io
-            - security.istio.io
-            - authentication.istio.io
-            - networking.istio.io
-            apiVersions:
-            - "*"
-            resources:
-            - "*"
-        failurePolicy: Fail
-        sideEffects: None
 ---
 
 
@@ -8615,7 +8561,7 @@ metadata:
   name: istiod
   namespace: istio-system
   labels:
-    app: pilot
+    app: istiod
     istio: pilot
     release: istio
 spec:
@@ -8629,14 +8575,14 @@ spec:
   template:
     metadata:
       labels:
-        app: pilot
+        app: istiod
         # Label used by the 'default' service. For versioned deployments we match with app and version.
         # This avoids default deployment picking the canary
         istio: pilot
       annotations:
         sidecar.istio.io/inject: "false"
     spec:
-      serviceAccountName: istio-pilot-service-account
+      serviceAccountName: istiod-service-account
       securityContext:
         fsGroup: 1337
       containers:
@@ -8712,6 +8658,9 @@ spec:
             runAsUser: 1337
             runAsGroup: 1337
             runAsNonRoot: true
+            capabilities:
+              drop:
+              - ALL
           volumeMounts:
           - name: config-volume
             mountPath: /etc/istio/config
@@ -8728,9 +8677,6 @@ spec:
             readOnly: true
           - name: istiod
             mountPath: /var/lib/istio/local
-            readOnly: true
-          - name: validation
-            mountPath: /var/lib/istio/validation
             readOnly: true
       volumes:
       # Technically not needed on this pod - but it helps debugging/testing SDS
@@ -8758,10 +8704,6 @@ spec:
       - name: inject
         configMap:
           name: istio-sidecar-injector
-          optional: true
-      - name: validation
-        configMap:
-          name: istio-validation
           optional: true
       - name: config-volume
         configMap:
@@ -9254,11 +9196,6 @@ data:
           value: |
                  {{ toJSON .ObjectMeta.Annotations }}
         {{ end }}
-        {{ if .ObjectMeta.Labels }}
-        - name: ISTIO_METAJSON_LABELS
-          value: |
-                 {{ toJSON .ObjectMeta.Labels }}
-        {{ end }}
         {{- if .DeploymentMeta.Name }}
         - name: ISTIO_META_WORKLOAD_NAME
           value: {{ .DeploymentMeta.Name }}
@@ -9359,6 +9296,8 @@ data:
           name: istio-certs
           readOnly: true
         {{- end }}
+        - name: podinfo
+          mountPath: /etc/istio/pod
         {{- if and (eq .Values.global.proxy.tracer "lightstep") .Values.global.tracer.lightstep.cacertPath }}
         - mountPath: {{ directory .ProxyConfig.GetTracing.GetLightstep.GetCacertPath }}
           name: lightstep-certs
@@ -9380,6 +9319,15 @@ data:
       - emptyDir:
           medium: Memory
         name: istio-envoy
+      - name: podinfo
+        downwardAPI:
+          items:
+            - path: "labels"
+              fieldRef:
+                fieldPath: metadata.labels
+            - path: "annotations"
+              fieldRef:
+                fieldPath: metadata.annotations
       {{- if eq .Values.global.jwtPolicy "third-party-jwt" }}
       - name: istio-token
         projected:
@@ -9468,17 +9416,17 @@ webhooks:
 apiVersion: policy/v1beta1
 kind: PodDisruptionBudget
 metadata:
-  name: istio-pilot
+  name: istiod-
   namespace: istio-system
   labels:
-    app: pilot
+    app: istiod
     release: istio
     istio: pilot
 spec:
   minAvailable: 1
   selector:
     matchLabels:
-      app: pilot
+      app: istiod
       release: istio
       istio: pilot
 ---
@@ -9529,7 +9477,7 @@ spec:
       name: https-webhook # validation and injection
       targetPort: 15017
   selector:
-    app: pilot
+    app: istiod
     # Label used by the 'default' service. For versioned deployments we match with app and version.
     # This avoids default deployment picking the canary
     istio: pilot
@@ -9539,10 +9487,10 @@ spec:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: istio-pilot-service-account
+  name: istiod-service-account
   namespace: istio-system
   labels:
-    app: pilot
+    app: istiod
     release: istio
 ---
 
@@ -10262,6 +10210,45 @@ spec:
 apiVersion: admissionregistration.k8s.io/v1beta1
 kind: ValidatingWebhookConfiguration
 metadata:
+  name: istiod-istio-system
+  namespace: istio-system
+  labels:
+    app: istiod
+    release: istio
+    istio: istiod
+webhooks:
+  - name: validation.istio.io
+    clientConfig:
+      service:
+        name: istiod
+        namespace: istio-system
+        path: "/validate"
+      caBundle: "" # patched at runtime when the webhook is ready.
+    rules:
+      - operations:
+        - CREATE
+        - UPDATE
+        apiGroups:
+        - config.istio.io
+        - rbac.istio.io
+        - security.istio.io
+        - authentication.istio.io
+        - networking.istio.io
+        apiVersions:
+        - "*"
+        resources:
+        - "*"
+    # Fail open until the validation webhook is ready. The webhook controller
+    # will update this to `Fail` and patch in the `caBundle` when the webhook
+    # endpoint is ready.
+    failurePolicy: Ignore
+    sideEffects: None
+---
+
+
+apiVersion: admissionregistration.k8s.io/v1beta1
+kind: ValidatingWebhookConfiguration
+metadata:
   name: istio-galley
   namespace: istio-system
   labels:
@@ -10458,6 +10445,9 @@ spec:
           requests:
             cpu: 10m
         securityContext:
+          capabilities:
+            drop:
+            - ALL
           runAsGroup: 1337
           runAsNonRoot: true
           runAsUser: 1337
@@ -11932,6 +11922,9 @@ spec:
             cpu: 1000m
             memory: 1G
         securityContext:
+          capabilities:
+            drop:
+            - ALL
           runAsGroup: 1337
           runAsNonRoot: true
           runAsUser: 1337
