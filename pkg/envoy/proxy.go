@@ -61,7 +61,8 @@ type ProxyConfig struct {
 	PilotCertProvider   string
 	// ProvCert is the filename of the XDS cluster root certificate
 	// Set as provisioned_cert
-	ProvCert string
+	ProvCert            string
+	Sidecar             bool
 }
 
 // NewProxy creates an instance of the proxy control commands
@@ -100,7 +101,8 @@ func (e *envoy) IsLive() bool {
 
 func (e *envoy) Drain() error {
 	adminPort := uint32(e.Config.ProxyAdminPort)
-	err := DrainListeners(adminPort)
+
+	err := DrainListeners(adminPort, e.Sidecar)
 	if err != nil {
 		log.Infof("failed draining listeners for Envoy on port %d: %v", adminPort, err)
 	}

@@ -565,6 +565,12 @@ data:
           {{ toYaml $value | indent 4 }}
           {{ end }}
           {{- end }}
+      {{- if .ProxyConfig.ProxyMetadata.ISTIO_META_DNS_CAPTURE }}
+      dnsConfig:
+        options:
+        - name: "ndots"
+          value: "4"
+      {{- end }}
       volumes:
       {{- if (isset .ObjectMeta.Annotations `sidecar.istio.io/bootstrapOverride`) }}
       - name: custom-bootstrap-volume
@@ -625,11 +631,7 @@ data:
       {{- end }}
       podRedirectAnnot:
       {{- if and (.Values.istio_cni.enabled) (not .Values.istio_cni.chained) }}
-      {{ if isset .ObjectMeta.Annotations `k8s.v1.cni.cncf.io/networks` }}
-        k8s.v1.cni.cncf.io/networks: "{{ index .ObjectMeta.Annotations `k8s.v1.cni.cncf.io/networks`}}, istio-cni"
-      {{- else }}
-        k8s.v1.cni.cncf.io/networks: "istio-cni"
-      {{- end }}
+        k8s.v1.cni.cncf.io/networks: '{{ appendMultusNetwork (index .ObjectMeta.Annotations `k8s.v1.cni.cncf.io/networks`) `istio-cni` }}'
       {{- end }}
         sidecar.istio.io/interceptionMode: "{{ annotation .ObjectMeta `sidecar.istio.io/interceptionMode` .ProxyConfig.InterceptionMode }}"
         traffic.sidecar.istio.io/includeOutboundIPRanges: "{{ annotation .ObjectMeta `traffic.sidecar.istio.io/includeOutboundIPRanges` .Values.global.proxy.includeIPRanges }}"
@@ -1164,6 +1166,7 @@ spec:
                       inline_string: "envoy.wasm.stats"
 ---
 # Source: istio-discovery/templates/telemetryv2_1.7.yaml
+# Note: metadata exchange filter is wasm enabled only in sidecars.
 apiVersion: networking.istio.io/v1alpha3
 kind: EnvoyFilter
 metadata:
@@ -1175,7 +1178,61 @@ spec:
   configPatches:
     - applyTo: HTTP_FILTER
       match:
-        context: ANY # inbound, outbound, and gateway
+        context: SIDECAR_INBOUND
+        proxy:
+          proxyVersion: '^1\.7.*'
+        listener:
+          filterChain:
+            filter:
+              name: "envoy.http_connection_manager"
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: istio.metadata_exchange
+          typed_config:
+            "@type": type.googleapis.com/udpa.type.v1.TypedStruct
+            type_url: type.googleapis.com/envoy.extensions.filters.http.wasm.v3.Wasm
+            value:
+              config:
+                configuration:
+                  "@type": "type.googleapis.com/google.protobuf.StringValue"
+                  value: |
+                    {}
+                vm_config:
+                  runtime: envoy.wasm.runtime.null
+                  code:
+                    local:
+                      inline_string: envoy.wasm.metadata_exchange
+    - applyTo: HTTP_FILTER
+      match:
+        context: SIDECAR_OUTBOUND
+        proxy:
+          proxyVersion: '^1\.7.*'
+        listener:
+          filterChain:
+            filter:
+              name: "envoy.http_connection_manager"
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: istio.metadata_exchange
+          typed_config:
+            "@type": type.googleapis.com/udpa.type.v1.TypedStruct
+            type_url: type.googleapis.com/envoy.extensions.filters.http.wasm.v3.Wasm
+            value:
+              config:
+                configuration:
+                  "@type": "type.googleapis.com/google.protobuf.StringValue"
+                  value: |
+                    {}
+                vm_config:
+                  runtime: envoy.wasm.runtime.null
+                  code:
+                    local:
+                      inline_string: envoy.wasm.metadata_exchange
+    - applyTo: HTTP_FILTER
+      match:
+        context: GATEWAY
         proxy:
           proxyVersion: '^1\.7.*'
         listener:
@@ -1260,6 +1317,7 @@ spec:
                 protocol: istio-peer-exchange
 ---
 # Source: istio-discovery/templates/telemetryv2_1.7.yaml
+# Note: http stats filter is wasm enabled only in sidecars.
 apiVersion: networking.istio.io/v1alpha3
 kind: EnvoyFilter
 metadata:
@@ -1374,6 +1432,7 @@ spec:
                       inline_string: envoy.wasm.stats
 ---
 # Source: istio-discovery/templates/telemetryv2_1.7.yaml
+# Note: tcp stats filter is wasm enabled only in sidecars.
 apiVersion: networking.istio.io/v1alpha3
 kind: EnvoyFilter
 metadata:
@@ -1481,6 +1540,7 @@ spec:
                       inline_string: "envoy.wasm.stats"
 ---
 # Source: istio-discovery/templates/telemetryv2_1.8.yaml
+# Note: metadata exchange filter is wasm enabled only in sidecars.
 apiVersion: networking.istio.io/v1alpha3
 kind: EnvoyFilter
 metadata:
@@ -1492,7 +1552,61 @@ spec:
   configPatches:
     - applyTo: HTTP_FILTER
       match:
-        context: ANY # inbound, outbound, and gateway
+        context: SIDECAR_INBOUND
+        proxy:
+          proxyVersion: '^1\.8.*'
+        listener:
+          filterChain:
+            filter:
+              name: "envoy.http_connection_manager"
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: istio.metadata_exchange
+          typed_config:
+            "@type": type.googleapis.com/udpa.type.v1.TypedStruct
+            type_url: type.googleapis.com/envoy.extensions.filters.http.wasm.v3.Wasm
+            value:
+              config:
+                configuration:
+                  "@type": "type.googleapis.com/google.protobuf.StringValue"
+                  value: |
+                    {}
+                vm_config:
+                  runtime: envoy.wasm.runtime.null
+                  code:
+                    local:
+                      inline_string: envoy.wasm.metadata_exchange
+    - applyTo: HTTP_FILTER
+      match:
+        context: SIDECAR_OUTBOUND
+        proxy:
+          proxyVersion: '^1\.8.*'
+        listener:
+          filterChain:
+            filter:
+              name: "envoy.http_connection_manager"
+      patch:
+        operation: INSERT_BEFORE
+        value:
+          name: istio.metadata_exchange
+          typed_config:
+            "@type": type.googleapis.com/udpa.type.v1.TypedStruct
+            type_url: type.googleapis.com/envoy.extensions.filters.http.wasm.v3.Wasm
+            value:
+              config:
+                configuration:
+                  "@type": "type.googleapis.com/google.protobuf.StringValue"
+                  value: |
+                    {}
+                vm_config:
+                  runtime: envoy.wasm.runtime.null
+                  code:
+                    local:
+                      inline_string: envoy.wasm.metadata_exchange
+    - applyTo: HTTP_FILTER
+      match:
+        context: GATEWAY
         proxy:
           proxyVersion: '^1\.8.*'
         listener:
@@ -1577,6 +1691,7 @@ spec:
                 protocol: istio-peer-exchange
 ---
 # Source: istio-discovery/templates/telemetryv2_1.8.yaml
+# Note: http stats filter is wasm enabled only in sidecars.
 apiVersion: networking.istio.io/v1alpha3
 kind: EnvoyFilter
 metadata:
@@ -1691,6 +1806,7 @@ spec:
                       inline_string: envoy.wasm.stats
 ---
 # Source: istio-discovery/templates/telemetryv2_1.8.yaml
+# Note: tcp stats filter is wasm enabled only in sidecars.
 apiVersion: networking.istio.io/v1alpha3
 kind: EnvoyFilter
 metadata:

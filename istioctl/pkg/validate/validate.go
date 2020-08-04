@@ -203,6 +203,7 @@ func (v *validator) validateDeploymentLabel(istioNamespace string, un *unstructu
 
 func (v *validator) validateFile(istioNamespace *string, reader io.Reader) error {
 	decoder := yaml.NewDecoder(reader)
+	decoder.SetStrict(true)
 	var errs error
 	for {
 		// YAML allows non-string keys and the produces generic keys for nested fields
@@ -274,7 +275,7 @@ func NewValidateCommand(istioNamespace *string) *cobra.Command {
 
 	c := &cobra.Command{
 		Use:   "validate -f FILENAME [options]",
-		Short: "Validate Istio policy and rules (NOTE: validate is deprecated and will be removed in 1.6. Use 'istioctl analyze' to validate configuration.)",
+		Short: "Validate Istio policy and rules files",
 		Example: `
 		# Validate bookinfo-gateway.yaml
 		istioctl validate -f bookinfo-gateway.yaml

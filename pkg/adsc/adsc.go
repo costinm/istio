@@ -41,11 +41,11 @@ import (
 	"istio.io/istio/pkg/security"
 
 	"istio.io/istio/pilot/pkg/networking/util"
-	v2 "istio.io/istio/pilot/pkg/xds/v2"
 	v3 "istio.io/istio/pilot/pkg/xds/v3"
 	"istio.io/istio/pkg/config/schema/resource"
 
 	"github.com/envoyproxy/go-control-plane/pkg/conversion"
+	"github.com/envoyproxy/go-control-plane/pkg/wellknown"
 	"github.com/gogo/protobuf/types"
 	"github.com/golang/protobuf/jsonpb"
 	"github.com/golang/protobuf/proto"
@@ -56,6 +56,7 @@ import (
 
 	mcp "istio.io/api/mcp/v1alpha1"
 	"istio.io/api/mesh/v1alpha1"
+
 	"istio.io/istio/security/pkg/nodeagent/cache"
 
 	"istio.io/pkg/log"
@@ -122,6 +123,8 @@ type Config struct {
 
 	// TODO: remove the duplication - all security settings belong here.
 	SecOpts *security.Options
+
+	GrpcOpts []grpc.DialOption
 }
 
 // ADSC implements a basic client for ADS, for use in stress tests and tools
@@ -137,6 +140,8 @@ type ADSC struct {
 	nodeID string
 
 	url string
+
+	grpcOpts []grpc.DialOption
 
 	watchTime time.Time
 
@@ -240,6 +245,7 @@ func newADSC(p *v1alpha1.ProxyConfig, opts *Config) *ADSC {
 		sync:              map[string]time.Time{},
 		Sent:              map[string]*discovery.DiscoveryRequest{},
 		initialWatchTypes: []string{},
+		grpcOpts:    opts.GrpcOpts,
 	}
 	if opts.Namespace == "" {
 		opts.Namespace = "default"
@@ -398,16 +404,18 @@ func (a *ADSC) Close() {
 // connect will authenticate and connect to XDS.
 func (a *ADSC) connect() error {
 	var err error
+	opts := a.grpcOpts
+
 	if strings.HasSuffix(a.url, ":443") {
 		tlsCfg, err := a.tlsConfig()
 		if err != nil {
 			return err
 		}
 		creds := credentials.NewTLS(tlsCfg)
-		opts := []grpc.DialOption{
+		opts = append(opts, []grpc.DialOption{
 			grpc.WithTransportCredentials(creds),
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: 20 * time.Second}),
-		}
+		})
 		a.conn, err = grpc.Dial(a.url, opts...)
 		if err != nil {
 			return err
@@ -419,10 +427,10 @@ func (a *ADSC) connect() error {
 		}
 		creds := credentials.NewTLS(tlsCfg)
 
-		opts := []grpc.DialOption{
+		opts = append(opts, []grpc.DialOption{
 			// Verify Pilot cert and service account
 			grpc.WithTransportCredentials(creds),
-		}
+		})
 		a.conn, err = grpc.Dial(a.url, opts...)
 		if err != nil {
 			return err
@@ -490,8 +498,8 @@ func (a *ADSC) hasSynced() bool {
 		a.mutex.RLock()
 		t := a.Received[k]
 		a.mutex.RUnlock()
-		if t == nil {
-			log.Infoa("Not synced: ", k)
+		if t.IsZero() {
+			log.Warnf("Not synced: %v", k)
 			return false
 		}
 	}
@@ -578,30 +586,22 @@ func (a *ADSC) handleRecv(closeOnExit bool) {
 			a.VersionInfo[rsc.TypeUrl] = msg.VersionInfo
 			valBytes := rsc.Value
 			switch rsc.TypeUrl {
-			case v2.ListenerType, v3.ListenerType:
-				{
-					ll := &listener.Listener{}
-					_ = proto.Unmarshal(valBytes, ll)
-					listeners = append(listeners, ll)
-				}
-			case v2.ClusterType, v3.ClusterType:
-				{
-					cl := &cluster.Cluster{}
-					_ = proto.Unmarshal(valBytes, cl)
-					clusters = append(clusters, cl)
-				}
-			case v2.EndpointType, v3.EndpointType:
-				{
-					el := &endpoint.ClusterLoadAssignment{}
-					_ = proto.Unmarshal(valBytes, el)
-					eds = append(eds, el)
-				}
-			case v2.RouteType, v3.RouteType:
-				{
-					rl := &route.RouteConfiguration{}
-					_ = proto.Unmarshal(valBytes, rl)
-					routes = append(routes, rl)
-				}
+			case v3.ListenerType:
+				ll := &listener.Listener{}
+				_ = proto.Unmarshal(valBytes, ll)
+				listeners = append(listeners, ll)
+			case v3.ClusterType:
+				cl := &cluster.Cluster{}
+				_ = proto.Unmarshal(valBytes, cl)
+				clusters = append(clusters, cl)
+			case v3.EndpointType:
+				el := &endpoint.ClusterLoadAssignment{}
+				_ = proto.Unmarshal(valBytes, el)
+				eds = append(eds, el)
+			case v3.RouteType:
+				rl := &route.RouteConfiguration{}
+				_ = proto.Unmarshal(valBytes, rl)
+				routes = append(routes, rl)
 			default:
 				err = a.handleMCP(gvk, rsc, valBytes)
 				if err != nil {
@@ -711,12 +711,12 @@ func (a *ADSC) handleLDS(ll []*listener.Listener) {
 			filter = l.FilterChains[len(l.FilterChains)-2].Filters[0]
 		}
 
-		if filter.Name == "envoy.tcp_proxy" {
+		if filter.Name == wellknown.TCPProxy {
 			lt[l.Name] = l
 			config, _ := conversion.MessageToStruct(filter.GetTypedConfig())
 			c := config.Fields["cluster"].GetStringValue()
 			adscLog.Debugf("TCP: %s -> %s", l.Name, c)
-		} else if filter.Name == "envoy.http_connection_manager" {
+		} else if filter.Name == wellknown.HTTPConnectionManager {
 			lh[l.Name] = l
 
 			// Getting from config is too painful..
@@ -726,11 +726,11 @@ func (a *ADSC) handleLDS(ll []*listener.Listener) {
 			} else {
 				routes = append(routes, fmt.Sprintf("%d", port))
 			}
-		} else if filter.Name == "envoy.mongo_proxy" {
+		} else if filter.Name == wellknown.MongoProxy {
 			// ignore for now
-		} else if filter.Name == "envoy.redis_proxy" {
+		} else if filter.Name == wellknown.RedisProxy {
 			// ignore for now
-		} else if filter.Name == "envoy.filters.network.mysql_proxy" {
+		} else if filter.Name == wellknown.MySQLProxy {
 			// ignore for now
 		} else {
 			tm := &jsonpb.Marshaler{Indent: "  "}
@@ -998,6 +998,14 @@ func (a *ADSC) Wait(to time.Duration, updates ...string) ([]string, error) {
 				delete(want, "eds")
 			case v3.RouteType:
 				delete(want, "rds")
+			case "lds":
+				delete(want, v3.ListenerType)
+			case "cds":
+				delete(want, v3.ClusterType)
+			case "eds":
+				delete(want, v3.EndpointType)
+			case "rds":
+				delete(want, v3.RouteType)
 			}
 			delete(want, toDelete)
 			got = append(got, t)
@@ -1062,27 +1070,18 @@ func (a *ADSC) Watch() {
 
 // WatchConfig will use the new experimental API watching, similar with MCP.
 func (a *ADSC) WatchConfig() {
-	t := collections.IstioMeshV1Alpha1MeshConfig.Resource().GroupVersionKind().String()
-	a.initialWatchTypes = append(a.initialWatchTypes, t)
-	_ = a.Send(&discovery.DiscoveryRequest{
-		TypeUrl: t,
+	_ = a.stream.Send(&discovery.DiscoveryRequest{
+		ResponseNonce: time.Now().String(),
+		Node:          a.node(),
+		TypeUrl:       collections.IstioMeshV1Alpha1MeshConfig.Resource().GroupVersionKind().String(),
 	})
 
-	for _, sch := range []collection.Schema{collections.IstioNetworkingV1Alpha3Destinationrules,
-		collections.IstioNetworkingV1Alpha3Envoyfilters,
-		collections.IstioNetworkingV1Alpha3Gateways,
-		collections.IstioNetworkingV1Alpha3Serviceentries,
-		collections.IstioNetworkingV1Alpha3Sidecars,
-		collections.IstioNetworkingV1Alpha3Virtualservices,
-		collections.IstioNetworkingV1Alpha3Workloadentries,
-		collections.IstioSecurityV1Beta1Authorizationpolicies,
-		collections.IstioSecurityV1Beta1Peerauthentications,
-		collections.IstioSecurityV1Beta1Requestauthentications,
-	} {
-		t = sch.Resource().GroupVersionKind().String()
+	for _, sch := range collections.Pilot.All() {
 		a.initialWatchTypes = append(a.initialWatchTypes, t)
-		_ = a.Send(&discovery.DiscoveryRequest{
-			TypeUrl: t,
+		_ = a.stream.Send(&discovery.DiscoveryRequest{
+			ResponseNonce: time.Now().String(),
+			Node:          a.node(),
+			TypeUrl:       sch.Resource().GroupVersionKind().String(),
 		})
 	}
 }
@@ -1125,10 +1124,9 @@ func (a *ADSC) sendRsc(typeurl string, rsc []string) {
 }
 
 func (a *ADSC) ack(msg *discovery.DiscoveryResponse) {
-	stype := v3.GetShortType(msg.TypeUrl)
 	var resources []string
 	// TODO: Send routes also in future.
-	if stype == v3.EndpointShortType {
+	if msg.TypeUrl == v3.EndpointType {
 		for c := range a.edsClusters {
 			resources = append(resources, c)
 		}
@@ -1231,56 +1229,4 @@ func (a *ADSC) handleMCP(gvk []string, rsc *any.Any, valBytes []byte) error {
 	}
 
 	return nil
-}
-
-// Reconnect attempts to connect, with backoff in case of failure.
-func (a *ADSC) reconnect() {
-	var err error
-	t0 := time.Now()
-	if a.adsServiceClient == nil {
-		err = a.connect()
-		log.Warna("ADSC CONNECTING ", err)
-	} else {
-		edsstr, err := a.adsServiceClient.StreamAggregatedResources(context.Background())
-		log.Warna("RESTART SERVICE ", err)
-		if err == nil {
-			a.stream = edsstr
-			// first resource in stream needs meta
-			a.sendNodeMeta = true
-		}
-	}
-
-	if err == nil && a.stream != nil {
-		a.cfg.BackoffPolicy.Reset()
-	} else {
-		time.AfterFunc(a.cfg.BackoffPolicy.NextBackOff(), a.reconnect)
-
-		log.Warna("XXXXX Connect failed, reconnect after: ", a.cfg.BackoffPolicy.NextBackOff())
-		return
-	}
-	a.sendInitial()
-	a.handleRecv(false)
-	// Connection closed, try to reconnect
-	log.Warna("XXXXX Connect DONE, duration: ", time.Since(t0))
-	time.AfterFunc(100*time.Millisecond, a.reconnect)
-}
-
-// Start method attempts to behave like starting Envoy: will get credentials and attempt to
-// connect with exponential backoff.
-//
-// The Dial() method handles a single connection and allows fine control, for testing.
-//
-// Will:
-// - get certificate using the Secret provider, if CertRequired
-// - connect to the XDS server specified in ProxyConfig
-// - send initial request for watched resources
-// - wait for respose from XDS server
-// - on success, start a background thread to maintain the connection, with exp. backoff.
-func (a *ADSC) Start() {
-	// We want to reconnect
-	if a.cfg.BackoffPolicy == nil {
-		a.cfg.BackoffPolicy = backoff.NewExponentialBackOff()
-	}
-
-	go a.reconnect()
 }

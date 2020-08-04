@@ -33,7 +33,6 @@ import (
 
 	"istio.io/istio/pilot/pkg/security/model"
 	"istio.io/istio/pkg/kube"
-
 	"istio.io/istio/security/pkg/nodeagent/cache"
 	citadel "istio.io/istio/security/pkg/nodeagent/caclient/providers/citadel"
 	gca "istio.io/istio/security/pkg/nodeagent/caclient/providers/google"
@@ -90,6 +89,9 @@ type Agent struct {
 	// May also be a https address.
 	SDSAddress string
 
+	// CertPath is set with the location of the certs, or empty if mounted certs are not present.
+	CertsPath string
+
 	// RootCert is the CA root certificate. It is loaded part of detecting the
 	// SDS operating mode - may be the Citadel CA, Kubernentes CA or a custom
 	// CA. If not set it should be assumed we are using a public certificate (like ACME).
@@ -139,15 +141,15 @@ type AgentConfig struct {
 	LocalXDSAddr string
 }
 
-// NewSDSAgent wraps the logic for a local SDS. It will check if the JWT token required for local SDS is
+// NewAgent wraps the logic for a local SDS. It will check if the JWT token required for local SDS is
 // present, and set additional config options for the in-process SDS agent.
 //
 // The JWT token is currently using a pre-defined audience (istio-ca) or it must match the trust domain (WIP).
-// If the JWT token is not present - the local SDS agent can't authenticate.
+// If the JWT token is not present, and cannot be fetched through the credential fetcher - the local SDS agent can't authenticate.
 //
 // If node agent and JWT are mounted: it indicates user injected a config using hostPath, and will be used.
-//
-func NewAgent(proxyConfig *mesh.ProxyConfig, cfg *AgentConfig, sopts *security.Options) *Agent {
+func NewAgent(proxyConfig *mesh.ProxyConfig, cfg *AgentConfig,
+	sopts *security.Options) *Agent {
 	sa := &Agent{
 		proxyConfig: proxyConfig,
 		cfg:         cfg,
@@ -168,11 +170,24 @@ func NewAgent(proxyConfig *mesh.ProxyConfig, cfg *AgentConfig, sopts *security.O
 	// - if PROV_CERT is set, it'll be included in the TLS context sent to the server
 	//   This is a 'provisioning certificate' - long lived, managed by a tool, exchanged for
 	//   the short lived certs.
-	// - if a JWTPath token exists, will be included in the request.
+	// - if a JWTPath token exists, or can be fetched by credential fetcher, it will be included in the request.
 
-	if _, err := os.Stat(sa.secOpts.JWTPath); err != nil {
-		log.Warna("Missing JWT token ", sa.secOpts.JWTPath)
-		sa.secOpts.JWTPath = ""
+	// If original /etc/certs or a separate 'provisioning certs' (VM) are present,
+	// add them to the tlsContext. If server asks for them and they exist - will be provided.
+	certDir := "./etc/certs"
+	if citadel.ProvCert != "" {
+		certDir = citadel.ProvCert
+	}
+	if _, err := os.Stat(certDir + "/key.pem"); err == nil {
+		sa.CertsPath = certDir
+	}
+	if sa.CertsPath != "" {
+		log.Warna("Using existing certificate ", sa.CertsPath)
+	}
+
+	// If the root-cert is in the old location, use it.
+	if _, err := os.Stat(certDir + "/root-cert.pem"); err == nil {
+		CitadelCACertPath = certDir
 	}
 
 	if sa.secOpts.CAEndpoint == "" {
@@ -182,6 +197,13 @@ func NewAgent(proxyConfig *mesh.ProxyConfig, cfg *AgentConfig, sopts *security.O
 
 	// Next to the envoy config, writeable dir (mounted as mem)
 	sa.secOpts.WorkloadUDSPath = LocalSDS
+	sa.secOpts.CertsDir = sa.CertsPath
+	// Set TLSEnabled if the ControlPlaneAuthPolicy is set to MUTUAL_TLS
+	if sa.proxyConfig.ControlPlaneAuthPolicy == mesh.AuthenticationPolicy_MUTUAL_TLS {
+		sa.secOpts.TLSEnabled = true
+	} else {
+		sa.secOpts.TLSEnabled = false
+	}
 	// If proxy is using file mounted certs, JWT token is not needed.
 	sa.secOpts.UseLocalJWT = !sa.secOpts.FileMountedCerts
 
@@ -340,6 +362,11 @@ func (sa *Agent) newWorkloadSecretCache() (workloadSecretCache *cache.SecretCach
 		caClient, err = gca.NewGoogleCAClient(sa.secOpts.CAEndpoint, true)
 		sa.secOpts.PluginNames = []string{"GoogleTokenExchange"}
 	} else {
+		// Determine the default CA.
+		// If /etc/certs exists - it means Citadel is used (possibly in a mode to only provision the root-cert, not keys)
+		// Otherwise: default to istiod
+		//
+		// If an explicit CA is configured, assume it is mounting /etc/certs
 		var rootCert []byte
 		// Special case: if Istiod runs on a secure network, on the default port, don't use TLS
 		// TODO: may add extra cases or explicit settings - but this is a rare use cases, mostly debugging
@@ -354,10 +381,10 @@ func (sa *Agent) newWorkloadSecretCache() (workloadSecretCache *cache.SecretCach
 				log.Fatalf("invalid config - %s missing a root certificate %s", sa.secOpts.CAEndpoint, caCertFile)
 			} else {
 				log.Infof("Using CA %s cert with certs: %s", sa.secOpts.CAEndpoint, caCertFile)
-			}
+
+
 			sa.RootCert = rootCert
 		}
-
 		// Will use TLS unless the reserved 15010 port is used ( istiod on an ipsec/secure VPC)
 		// rootCert may be nil - in which case the system roots are used, and the CA is expected to have public key
 		// Otherwise assume the injection has mounted /etc/certs/root-cert.pem

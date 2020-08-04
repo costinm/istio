@@ -35,11 +35,12 @@ import (
 )
 
 type request struct {
-	URL       string
-	Header    http.Header
-	RequestID int
-	Message   string
-	Timeout   time.Duration
+	URL         string
+	Header      http.Header
+	RequestID   int
+	Message     string
+	Timeout     time.Duration
+	ServerFirst bool
 }
 
 type protocol interface {
@@ -74,6 +75,10 @@ func newProtocol(cfg Config) (protocol, error) {
 		proto := &httpProtocol{
 			client: &http.Client{
 				Transport: &http.Transport{
+					// We are creating a Transport on each ForwardEcho request. Transport is what holds connections,
+					// so this means every ForwardEcho request will create a new connection. Without setting an idle timeout,
+					// we would never close these connections.
+					IdleConnTimeout: time.Second,
 					TLSClientConfig: &tls.Config{
 						InsecureSkipVerify: true,
 					},

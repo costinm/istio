@@ -24,14 +24,15 @@ import (
 	"istio.io/istio/pkg/test/framework"
 	"istio.io/istio/pkg/test/framework/components/echo"
 	"istio.io/istio/pkg/test/framework/components/echo/echoboot"
-	"istio.io/istio/pkg/test/framework/components/ingress"
 	"istio.io/istio/pkg/test/framework/components/istio"
+	"istio.io/istio/pkg/test/framework/components/istio/ingress"
 	"istio.io/istio/pkg/test/framework/components/namespace"
 	"istio.io/istio/pkg/test/framework/resource"
 )
 
 var (
-	i    istio.Instance
+	i istio.Instance
+
 	ingr ingress.Instance
 
 	// Below are various preconfigured echo deployments. Whenever possible, tests should utilize these
@@ -59,10 +60,10 @@ type EchoDeployments struct {
 	podA echo.Instance
 	// Standard echo app to be used by tests
 	podB echo.Instance
-	// Headless echo app to be used by tests
-	headless echo.Instance
 	// Standard echo app to be used by tests
 	podC echo.Instance
+	// Headless echo app to be used by tests
+	headless echo.Instance
 	// Echo app to be used by tests, with no sidecar injected
 	naked echo.Instance
 	// A virtual machine echo app
@@ -88,6 +89,8 @@ func TestMain(m *testing.M) {
 			return ctx.Config().ApplyYAML("", string(crd))
 		}).
 		Setup(istio.Setup(&i, func(cfg *istio.Config) {
+			cfg.Values["telemetry.v2.metadataExchange.wasmEnabled"] = "false"
+			cfg.Values["telemetry.v2.prometheus.wasmEnabled"] = "false"
 			cfg.ControlPlaneValues = `
 values:
   global:
@@ -125,6 +128,7 @@ values:
 					Namespace: apps.namespace,
 					Ports:     echoPorts,
 					Subsets:   []echo.SubsetConfig{{}},
+					Locality:  "region.zone.subzone",
 				}).
 				With(&apps.podB, echo.Config{
 					Service:   "b",
@@ -187,11 +191,7 @@ values:
 			return nil
 		}).
 		Setup(func(ctx resource.Context) (err error) {
-			if ingr, err = ingress.New(ctx, ingress.Config{
-				Istio: i,
-			}); err != nil {
-				return err
-			}
+			ingr = i.IngressFor(ctx.Clusters().Default())
 
 			apps.externalHost = "fake.example.com"
 			if err := ctx.Config().ApplyYAML(apps.namespace.Name(), fmt.Sprintf(`

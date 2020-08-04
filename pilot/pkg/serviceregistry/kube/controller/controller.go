@@ -121,6 +121,12 @@ type Options struct {
 
 	// CABundlePath defines the caBundle path for istiod Server
 	CABundlePath string
+
+	// Maximum QPS when communicating with kubernetes API
+	KubernetesAPIQPS float32
+
+	// Maximum burst for throttle when communicating with the kubernetes API
+	KubernetesAPIBurst int
 }
 
 // EndpointMode decides what source to use to get endpoint information
@@ -214,8 +220,6 @@ type Controller struct {
 // NewController creates a new Kubernetes controller
 // Created by bootstrap and multicluster (see secretcontroler).
 func NewController(kubeClient kubelib.Client, options Options) *Controller {
-	log.Infof("Initializing Kubernetes service registry %q", options.ClusterID)
-
 	// The queue requires a time duration for a retry delay after a handler error
 	c := &Controller{
 		domainSuffix:               options.DomainSuffix,

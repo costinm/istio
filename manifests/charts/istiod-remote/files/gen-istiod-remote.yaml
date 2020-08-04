@@ -4,7 +4,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: istio
-  namespace: default
+  namespace: istio-system
   labels:
     istio.io/rev: default
     release: istiod-remote
@@ -16,7 +16,7 @@ data:
 
   mesh: |-
     defaultConfig:
-      discoveryAddress: istiod.default.svc:15012
+      discoveryAddress: istiod.istio-system.svc:15012
       proxyMetadata:
         DNS_AGENT: ""
       tracing:
@@ -31,7 +31,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: istio-sidecar-injector
-  namespace: default
+  namespace: istio-system
   labels:
     istio.io/rev: default
     release: istiod-remote
@@ -547,6 +547,12 @@ data:
           {{ toYaml $value | indent 4 }}
           {{ end }}
           {{- end }}
+      {{- if .ProxyConfig.ProxyMetadata.ISTIO_META_DNS_CAPTURE }}
+      dnsConfig:
+        options:
+        - name: "ndots"
+          value: "4"
+      {{- end }}
       volumes:
       {{- if (isset .ObjectMeta.Annotations `sidecar.istio.io/bootstrapOverride`) }}
       - name: custom-bootstrap-volume
@@ -607,11 +613,7 @@ data:
       {{- end }}
       podRedirectAnnot:
       {{- if and (.Values.istio_cni.enabled) (not .Values.istio_cni.chained) }}
-      {{ if isset .ObjectMeta.Annotations `k8s.v1.cni.cncf.io/networks` }}
-        k8s.v1.cni.cncf.io/networks: "{{ index .ObjectMeta.Annotations `k8s.v1.cni.cncf.io/networks`}}, istio-cni"
-      {{- else }}
-        k8s.v1.cni.cncf.io/networks: "istio-cni"
-      {{- end }}
+        k8s.v1.cni.cncf.io/networks: '{{ appendMultusNetwork (index .ObjectMeta.Annotations `k8s.v1.cni.cncf.io/networks`) `istio-cni` }}'
       {{- end }}
         sidecar.istio.io/interceptionMode: "{{ annotation .ObjectMeta `sidecar.istio.io/interceptionMode` .ProxyConfig.InterceptionMode }}"
         traffic.sidecar.istio.io/includeOutboundIPRanges: "{{ annotation .ObjectMeta `traffic.sidecar.istio.io/includeOutboundIPRanges` .Values.global.proxy.includeIPRanges }}"
@@ -637,7 +639,8 @@ data:
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
 metadata:
-  name: istio-sidecar-injector-default
+  name: istio-sidecar-injector
+
   labels:
     istio.io/rev: default
     app: sidecar-injector

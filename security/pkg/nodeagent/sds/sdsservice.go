@@ -27,12 +27,11 @@ import (
 	"time"
 
 	core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
-	discoveryv2 "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v2"
 	discovery "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
 
 	"istio.io/istio/pilot/pkg/xds"
 	"istio.io/istio/pkg/security"
-	"istio.io/istio/security/pkg/nodeagent/util"
+	nodeagentutil "istio.io/istio/security/pkg/nodeagent/util"
 
 	tls "github.com/envoyproxy/go-control-plane/envoy/extensions/transport_sockets/tls/v3"
 	sds "github.com/envoyproxy/go-control-plane/envoy/service/secret/v3"
@@ -132,6 +131,9 @@ type sdsservice struct {
 	jwtPath string
 
 	outputKeyCertToDir string
+
+	// Credential fetcher
+	credFetcher security.CredFetcher
 }
 
 // ClientDebug represents a single SDS connection to the ndoe agent
@@ -169,6 +171,7 @@ func newSDSService(st security.SecretManager,
 		localJWT:             secOpt.UseLocalJWT,
 		jwtPath:              secOpt.JWTPath,
 		outputKeyCertToDir:   secOpt.OutputKeyCertToDir,
+		credFetcher:          secOpt.CredFetcher,
 	}
 
 	go ret.clearStaledClientsJob()
@@ -179,7 +182,6 @@ func newSDSService(st security.SecretManager,
 // register adds the SDS handle to the grpc server
 func (s *sdsservice) register(rpcs *grpc.Server) {
 	sds.RegisterSecretDiscoveryServiceServer(rpcs, s)
-	discoveryv2.RegisterSecretDiscoveryServiceServer(rpcs, s.createV2Adapter())
 }
 
 // DebugInfo serializes the current sds client data into JSON for the debug endpoint
@@ -284,14 +286,25 @@ func (s *sdsservice) StreamSecrets(stream sds.SecretDiscoveryService_StreamSecre
 			defer releaseResourcePerConn(s, conID, resourceName)
 
 			conIDresourceNamePrefix := sdsLogPrefix(resourceName)
-			if s.localJWT && s.jwtPath != "" {
+			if s.localJWT {
 				// Running in-process, no need to pass the token from envoy to agent as in-context - use the file
-				tok, err := ioutil.ReadFile(s.jwtPath)
+				t, err := s.getToken()
 				if err != nil {
 					sdsServiceLog.Errorf("Failed to get credential token: %v", err)
 					return err
 				}
-				token = string(tok)
+				token = t
+			} else if s.outputKeyCertToDir != "" {
+				// Using existing certs and the new SDS - skipToken case is for the old node agent.
+			} else if !s.skipToken {
+				ctx = stream.Context()
+				t, err := getCredentialToken(ctx)
+				if err != nil {
+					sdsServiceLog.Errorf("%s Close connection. Failed to get credential token from "+
+						"incoming request: %v", conIDresourceNamePrefix, err)
+					return err
+				}
+				token = t
 			}
 
 			// Update metrics.
@@ -339,7 +352,7 @@ func (s *sdsservice) StreamSecrets(stream sds.SecretDiscoveryService_StreamSecre
 			}
 
 			// Output the key and cert to a directory, if some applications need to read them from local file system.
-			if err = util.OutputKeyCertToDir(s.outputKeyCertToDir, secret.PrivateKey,
+			if err = nodeagentutil.OutputKeyCertToDir(s.outputKeyCertToDir, secret.PrivateKey,
 				secret.CertificateChain, secret.RootCert); err != nil {
 				sdsServiceLog.Errorf("(%v, %v) error when output the key and cert: %v",
 					conIDresourceNamePrefix, discReq.Node.Id, err)
@@ -389,13 +402,12 @@ func (s *sdsservice) StreamSecrets(stream sds.SecretDiscoveryService_StreamSecre
 func (s *sdsservice) FetchSecrets(ctx context.Context, discReq *discovery.DiscoveryRequest) (*discovery.DiscoveryResponse, error) {
 	token := ""
 	if s.localJWT {
-		// Running in-process, no need to pass the token from envoy to agent as in-context - use the file
-		tok, err := ioutil.ReadFile(s.jwtPath)
+		t, err := s.getToken()
 		if err != nil {
 			sdsServiceLog.Errorf("Failed to get credential token: %v", err)
 			return nil, err
 		}
-		token = string(tok)
+		token = t
 	} else if !s.skipToken {
 		t, err := getCredentialToken(ctx)
 		if err != nil {
@@ -419,13 +431,33 @@ func (s *sdsservice) FetchSecrets(ctx context.Context, discReq *discovery.Discov
 	}
 
 	// Output the key and cert to a directory, if some applications need to read them from local file system.
-	if err = util.OutputKeyCertToDir(s.outputKeyCertToDir, secret.PrivateKey,
+	if err = nodeagentutil.OutputKeyCertToDir(s.outputKeyCertToDir, secret.PrivateKey,
 		secret.CertificateChain, secret.RootCert); err != nil {
 		sdsServiceLog.Errorf("(%v) error when output the key and cert: %v",
 			connID, err)
 		return nil, err
 	}
 	return sdsDiscoveryResponse(secret, resourceName, discReq.TypeUrl)
+}
+
+func (s *sdsservice) getToken() (string, error) {
+	token := ""
+	if s.credFetcher != nil {
+		t, err := s.credFetcher.GetPlatformCredential()
+		if err != nil {
+			sdsServiceLog.Errorf("Failed to get credential token through credential fetcher: %v", err)
+			return "", err
+		}
+		token = t
+	} else {
+		tok, err := ioutil.ReadFile(s.jwtPath)
+		if err != nil {
+			sdsServiceLog.Errorf("failed to get credential token: %v from path %s", err, s.jwtPath)
+			return "", err
+		}
+		token = string(tok)
+	}
+	return token, nil
 }
 
 func (s *sdsservice) Stop() {

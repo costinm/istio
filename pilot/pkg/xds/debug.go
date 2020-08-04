@@ -110,7 +110,7 @@ func (s *DiscoveryServer) InitDebug(mux *http.ServeMux, sctl *aggregate.Controll
 
 	mux.HandleFunc("/debug", s.Debug)
 
-	s.addDebugHandler(mux, "/debug/edsz", "Status and debug interface for EDS", s.edsz)
+	s.addDebugHandler(mux, "/debug/edsz", "Status and debug interface for EDS", s.Edsz)
 	s.addDebugHandler(mux, "/debug/adsz", "Status and debug interface for ADS", s.adsz)
 	s.addDebugHandler(mux, "/debug/adsz?push=true", "Initiates push of the current state to all connected endpoints", s.adsz)
 	s.addDebugHandler(mux, "/debug/cdsz", "Status and debug interface for CDS", s.cdsz)
@@ -163,14 +163,14 @@ func (s *DiscoveryServer) Syncz(w http.ResponseWriter, _ *http.Request) {
 			syncz = append(syncz, SyncStatus{
 				ProxyID:       con.node.ID,
 				IstioVersion:  con.node.Metadata.IstioVersion,
-				ClusterSent:   con.NonceSent(v3.ClusterShortType),
-				ClusterAcked:  con.NonceAcked(v3.ClusterShortType),
-				ListenerSent:  con.NonceSent(v3.ListenerShortType),
-				ListenerAcked: con.NonceAcked(v3.ListenerShortType),
-				RouteSent:     con.NonceSent(v3.RouteShortType),
-				RouteAcked:    con.NonceAcked(v3.RouteShortType),
-				EndpointSent:  con.NonceSent(v3.EndpointShortType),
-				EndpointAcked: con.NonceAcked(v3.EndpointShortType),
+				ClusterSent:   con.NonceSent(v3.ClusterType),
+				ClusterAcked:  con.NonceAcked(v3.ClusterType),
+				ListenerSent:  con.NonceSent(v3.ListenerType),
+				ListenerAcked: con.NonceAcked(v3.ListenerType),
+				RouteSent:     con.NonceSent(v3.RouteType),
+				RouteAcked:    con.NonceAcked(v3.RouteType),
+				EndpointSent:  con.NonceSent(v3.EndpointType),
+				EndpointAcked: con.NonceAcked(v3.EndpointType),
 			})
 		}
 		con.mu.RUnlock()
@@ -294,11 +294,11 @@ func (s *DiscoveryServer) distributedVersions(w http.ResponseWriter, req *http.R
 				// read nonces from our statusreporter to allow for skipped nonces, etc.
 				results = append(results, SyncedVersions{
 					ProxyID: con.node.ID,
-					ClusterVersion: s.getResourceVersion(s.StatusReporter.QueryLastNonce(con.ConID, ClusterEventType),
+					ClusterVersion: s.getResourceVersion(s.StatusReporter.QueryLastNonce(con.ConID, v3.ClusterType),
 						resourceID, knownVersions),
-					ListenerVersion: s.getResourceVersion(s.StatusReporter.QueryLastNonce(con.ConID, ListenerEventType),
+					ListenerVersion: s.getResourceVersion(s.StatusReporter.QueryLastNonce(con.ConID, v3.ListenerType),
 						resourceID, knownVersions),
-					RouteVersion: s.getResourceVersion(s.StatusReporter.QueryLastNonce(con.ConID, RouteEventType),
+					RouteVersion: s.getResourceVersion(s.StatusReporter.QueryLastNonce(con.ConID, v3.RouteType),
 						resourceID, knownVersions),
 				})
 			}
@@ -489,7 +489,6 @@ func (s *DiscoveryServer) configDump(conn *Connection) (*adminapi.ConfigDump, er
 		if err != nil {
 			return nil, err
 		}
-		cluster.TypeUrl = conn.node.RequestedTypes.CDS
 		dynamicActiveClusters = append(dynamicActiveClusters, &adminapi.ClustersConfigDump_DynamicCluster{Cluster: cluster})
 	}
 	clustersAny, err := util.MessageToAnyWithError(&adminapi.ClustersConfigDump{
@@ -507,7 +506,6 @@ func (s *DiscoveryServer) configDump(conn *Connection) (*adminapi.ConfigDump, er
 		if err != nil {
 			return nil, err
 		}
-		listener.TypeUrl = conn.node.RequestedTypes.LDS
 		dynamicActiveListeners = append(dynamicActiveListeners, &adminapi.ListenersConfigDump_DynamicListener{
 			Name:        cs.Name,
 			ActiveState: &adminapi.ListenersConfigDump_DynamicListenerState{Listener: listener}})
@@ -529,7 +527,6 @@ func (s *DiscoveryServer) configDump(conn *Connection) (*adminapi.ConfigDump, er
 			if err != nil {
 				return nil, err
 			}
-			route.TypeUrl = conn.node.RequestedTypes.RDS
 			dynamicRouteConfig = append(dynamicRouteConfig, &adminapi.RoutesConfigDump_DynamicRouteConfig{RouteConfig: route})
 		}
 		routeConfigAny, err = util.MessageToAnyWithError(&adminapi.RoutesConfigDump{DynamicRouteConfigs: dynamicRouteConfig})
@@ -605,9 +602,9 @@ func (s *DiscoveryServer) Debug(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(200)
 }
 
-// edsz implements a status and debug interface for EDS.
+// Edsz implements a status and debug interface for EDS.
 // It is mapped to /debug/edsz on the monitor port (15014).
-func (s *DiscoveryServer) edsz(w http.ResponseWriter, req *http.Request) {
+func (s *DiscoveryServer) Edsz(w http.ResponseWriter, req *http.Request) {
 	_ = req.ParseForm()
 	w.Header().Add("Content-Type", "application/json")
 
