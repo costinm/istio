@@ -35,8 +35,6 @@ import (
 	discovery "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
 	"google.golang.org/grpc/keepalive"
 
-	"istio.io/istio/pkg/config/schema/collection"
-
 	"istio.io/istio/pilot/pkg/serviceregistry/memory"
 	"istio.io/istio/pkg/security"
 
@@ -415,7 +413,7 @@ func (a *ADSC) connect() error {
 		opts = append(opts, []grpc.DialOption{
 			grpc.WithTransportCredentials(creds),
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: 20 * time.Second}),
-		})
+		}...)
 		a.conn, err = grpc.Dial(a.url, opts...)
 		if err != nil {
 			return err
@@ -427,10 +425,7 @@ func (a *ADSC) connect() error {
 		}
 		creds := credentials.NewTLS(tlsCfg)
 
-		opts = append(opts, []grpc.DialOption{
-			// Verify Pilot cert and service account
-			grpc.WithTransportCredentials(creds),
-		})
+		opts = append(opts, grpc.WithTransportCredentials(creds))
 		a.conn, err = grpc.Dial(a.url, opts...)
 		if err != nil {
 			return err
@@ -498,7 +493,7 @@ func (a *ADSC) hasSynced() bool {
 		a.mutex.RLock()
 		t := a.Received[k]
 		a.mutex.RUnlock()
-		if t.IsZero() {
+		if t == nil {
 			log.Warnf("Not synced: %v", k)
 			return false
 		}
@@ -1077,7 +1072,7 @@ func (a *ADSC) WatchConfig() {
 	})
 
 	for _, sch := range collections.Pilot.All() {
-		a.initialWatchTypes = append(a.initialWatchTypes, t)
+		a.initialWatchTypes = append(a.initialWatchTypes, sch.Resource().GroupVersionKind().String())
 		_ = a.stream.Send(&discovery.DiscoveryRequest{
 			ResponseNonce: time.Now().String(),
 			Node:          a.node(),

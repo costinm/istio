@@ -499,7 +499,7 @@ func (s *Server) initIstiodAdminServer(args *PilotArgs, wh *inject.Webhook) erro
 // initDiscoveryService intializes discovery server on plain text port.
 func (s *Server) initDiscoveryService(args *PilotArgs) error {
 	log.Infof("starting discovery service")
-	// Implement EnvoyXdsServer grace shutdown
+	// Implement XdsServer grace shutdown
 	s.addStartFunc(func(stop <-chan struct{}) error {
 		log.Infof("Starting ADS server")
 		s.XDSServer.Start(stop)
@@ -1045,18 +1045,18 @@ func (s *Server) initNamespaceController(args *PilotArgs) {
 	}
 }
 
-// initGenerators initializes generators to be used by XdsServer.
+// initGenerators initializes generators to be used by XDSServer.
 func (s *Server) initGenerators() {
-	s.EnvoyXdsServer.Generators["grpc"] = &grpcgen.GrpcConfigGenerator{}
-	epGen := &xds.EdsGenerator{Server: s.EnvoyXdsServer}
-	s.EnvoyXdsServer.Generators["grpc/"+v2.EndpointType] = epGen
-	s.EnvoyXdsServer.Generators["api"] = &apigen.APIGenerator{}
-	s.EnvoyXdsServer.Generators["api/"+v2.EndpointType] = epGen
-	s.EnvoyXdsServer.InternalGen = &xds.InternalGen{
-		Server: s.EnvoyXdsServer,
+	s.XDSServer.Generators["grpc"] = &grpcgen.GrpcConfigGenerator{}
+	epGen := &xds.EdsGenerator{Server: s.XDSServer}
+	s.XDSServer.Generators["grpc/"+v2.EndpointType] = epGen
+	s.XDSServer.Generators["api"] = &apigen.APIGenerator{}
+	s.XDSServer.Generators["api/"+v2.EndpointType] = epGen
+	s.XDSServer.InternalGen = &xds.InternalGen{
+		Server: s.XDSServer,
 	}
-	s.EnvoyXdsServer.Generators["api/"+xds.TypeURLConnections] = s.EnvoyXdsServer.InternalGen
-	s.EnvoyXdsServer.Generators["event"] = s.EnvoyXdsServer.InternalGen
+	s.XDSServer.Generators["api/"+xds.TypeURLConnections] = s.XDSServer.InternalGen
+	s.XDSServer.Generators["event"] = s.XDSServer.InternalGen
 }
 
 // initJwtPolicy initializes JwtPolicy.
