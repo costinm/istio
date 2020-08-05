@@ -134,6 +134,9 @@ type ADSC struct {
 
 	conn *grpc.ClientConn
 
+	// Indicates if the ADSC client is closed
+	closed bool
+
 	// NodeID is the node identity sent to Pilot.
 	nodeID string
 
@@ -396,6 +399,7 @@ func (a *ADSC) tlsConfig() (*tls.Config, error) {
 func (a *ADSC) Close() {
 	a.mutex.Lock()
 	_ = a.conn.Close()
+	a.closed = true
 	a.mutex.Unlock()
 }
 
@@ -510,6 +514,19 @@ func (a *ADSC) onReceive(msg *discovery.DiscoveryResponse) {
 	select {
 	case a.syncCh <- msg.TypeUrl:
 	default:
+        }
+}
+func (a *ADSC) reconnect() {
+	a.mutex.RLock()
+	if a.closed {
+		return
+	}
+	a.mutex.RUnlock()
+	err := a.Run()
+	if err == nil {
+		a.cfg.BackoffPolicy.Reset()
+	} else {
+		time.AfterFunc(a.cfg.BackoffPolicy.NextBackOff(), a.reconnect)
 	}
 }
 

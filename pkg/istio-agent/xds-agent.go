@@ -15,6 +15,7 @@
 package istioagent
 
 import (
+	"fmt"
 	"net"
 	"strings"
 	"time"
@@ -101,6 +102,15 @@ func (sa *Agent) initXDS() {
 	sa.LocalXDSListener = sa.localListener
 }
 
+func (sa *Agent) Close() {
+	if sa.localGrpcServer != nil {
+		sa.localGrpcServer.Stop()
+	}
+	_ = sa.localListener.Close()
+	_ = sa.LocalXDSListener.Close()
+	sa.proxyGen.Close()
+}
+
 // startXDS will start the XDS proxy and client. Will connect to Istiod (or XDS server),
 // and start fetching configs to be cached.
 // If 'RequireCerts' is set, will attempt to get certificates. Will then attempt to connect to
@@ -125,6 +135,7 @@ func (sa *Agent) startXDS(proxyConfig *meshconfig.ProxyConfig, secrets security.
 		ResponseHandler: sa.proxyGen,
 		XDSRootCAFile:   sa.FindRootCAForXDS(),
 		Watch:           []string{"mcp", "envoy"},
+		GrpcOpts:        sa.cfg.GrpcOptions,
 	}
 
 	// Set Secrets and JWTPath if the default ControlPlaneAuthPolicy is MUTUAL_TLS
@@ -137,7 +148,7 @@ func (sa *Agent) startXDS(proxyConfig *meshconfig.ProxyConfig, secrets security.
 	if err != nil {
 		// Error to be handled by caller - probably by exit if
 		// we are in 'envoy using proxy' mode.
-		return err
+		return fmt.Errorf("adsc: %v", err)
 	}
 
 	ads.LocalCacheDir = savePath.Get()
