@@ -230,6 +230,8 @@ func NewServer(args *PilotArgs) (*Server, error) {
 	s.initGenerators()
 	s.initJwtPolicy()
 
+	spiffe.SetTrustDomain(s.environment.Mesh().TrustDomain)
+
 	// Options based on the current 'defaults' in istio.
 	caOpts := &CAOptions{
 		TrustDomain: s.environment.Mesh().TrustDomain,

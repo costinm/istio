@@ -514,19 +514,6 @@ func (a *ADSC) onReceive(msg *discovery.DiscoveryResponse) {
 	select {
 	case a.syncCh <- msg.TypeUrl:
 	default:
-        }
-}
-func (a *ADSC) reconnect() {
-	a.mutex.RLock()
-	if a.closed {
-		return
-	}
-	a.mutex.RUnlock()
-	err := a.Run()
-	if err == nil {
-		a.cfg.BackoffPolicy.Reset()
-	} else {
-		time.AfterFunc(a.cfg.BackoffPolicy.NextBackOff(), a.reconnect)
 	}
 }
 
@@ -1241,4 +1228,56 @@ func (a *ADSC) handleMCP(gvk []string, rsc *any.Any, valBytes []byte) error {
 	}
 
 	return nil
+}
+
+// Reconnect attempts to connect, with backoff in case of failure.
+func (a *ADSC) reconnect() {
+	var err error
+	t0 := time.Now()
+	if a.adsServiceClient == nil {
+		err = a.connect()
+		log.Warna("ADSC CONNECTING ", err)
+	} else {
+		edsstr, err := a.adsServiceClient.StreamAggregatedResources(context.Background())
+		log.Warna("RESTART SERVICE ", err)
+		if err == nil {
+			a.stream = edsstr
+			// first resource in stream needs meta
+			a.sendNodeMeta = true
+		}
+	}
+
+	if err == nil && a.stream != nil {
+		a.cfg.BackoffPolicy.Reset()
+	} else {
+		time.AfterFunc(a.cfg.BackoffPolicy.NextBackOff(), a.reconnect)
+
+		log.Warna("XXXXX Connect failed, reconnect after: ", a.cfg.BackoffPolicy.NextBackOff())
+		return
+	}
+	a.sendInitial()
+	a.handleRecv(false)
+	// Connection closed, try to reconnect
+	log.Warna("XXXXX Connect DONE, duration: ", time.Since(t0))
+	time.AfterFunc(100*time.Millisecond, a.reconnect)
+}
+
+// Start method attempts to behave like starting Envoy: will get credentials and attempt to
+// connect with exponential backoff.
+//
+// The Dial() method handles a single connection and allows fine control, for testing.
+//
+// Will:
+// - get certificate using the Secret provider, if CertRequired
+// - connect to the XDS server specified in ProxyConfig
+// - send initial request for watched resources
+// - wait for respose from XDS server
+// - on success, start a background thread to maintain the connection, with exp. backoff.
+func (a *ADSC) Start() {
+	// We want to reconnect
+	if a.cfg.BackoffPolicy == nil {
+		a.cfg.BackoffPolicy = backoff.NewExponentialBackOff()
+	}
+
+	go a.reconnect()
 }

@@ -92,9 +92,6 @@ type Agent struct {
 	// May also be a https address.
 	SDSAddress string
 
-	// CertPath is set with the location of the certs, or empty if mounted certs are not present.
-	CertsPath string
-
 	// RootCert is the CA root certificate. It is loaded part of detecting the
 	// SDS operating mode - may be the Citadel CA, Kubernentes CA or a custom
 	// CA. If not set it should be assumed we are using a public certificate (like ACME).
@@ -184,12 +181,6 @@ func NewAgent(proxyConfig *mesh.ProxyConfig, cfg *AgentConfig,
 	if citadel.ProvCert != "" {
 		certDir = citadel.ProvCert
 	}
-	if _, err := os.Stat(certDir + "/key.pem"); err == nil {
-		sa.CertsPath = certDir
-	}
-	if sa.CertsPath != "" {
-		log.Warna("Using existing certificate ", sa.CertsPath)
-	}
 
 	// If the root-cert is in the old location, use it.
 	if _, err := os.Stat(certDir + "/root-cert.pem"); err == nil {
@@ -203,13 +194,6 @@ func NewAgent(proxyConfig *mesh.ProxyConfig, cfg *AgentConfig,
 
 	// Next to the envoy config, writeable dir (mounted as mem)
 	sa.secOpts.WorkloadUDSPath = LocalSDS
-	sa.secOpts.CertsDir = sa.CertsPath
-	// Set TLSEnabled if the ControlPlaneAuthPolicy is set to MUTUAL_TLS
-	if sa.proxyConfig.ControlPlaneAuthPolicy == mesh.AuthenticationPolicy_MUTUAL_TLS {
-		sa.secOpts.TLSEnabled = true
-	} else {
-		sa.secOpts.TLSEnabled = false
-	}
 	// If proxy is using file mounted certs, JWT token is not needed.
 	sa.secOpts.UseLocalJWT = !sa.secOpts.FileMountedCerts
 
@@ -376,11 +360,6 @@ func (sa *Agent) newWorkloadSecretCache() (workloadSecretCache *cache.SecretCach
 		}
 		sa.secOpts.TokenExchangers = []security.TokenExchanger{stsclient.NewPlugin()}
 	} else {
-		// Determine the default CA.
-		// If /etc/certs exists - it means Citadel is used (possibly in a mode to only provision the root-cert, not keys)
-		// Otherwise: default to istiod
-		//
-		// If an explicit CA is configured, assume it is mounting /etc/certs
 		var rootCert []byte
 		// Special case: if Istiod runs on a secure network, on the default port, don't use TLS
 		// TODO: may add extra cases or explicit settings - but this is a rare use cases, mostly debugging
@@ -396,9 +375,10 @@ func (sa *Agent) newWorkloadSecretCache() (workloadSecretCache *cache.SecretCach
 			} else {
 				log.Infof("Using CA %s cert with certs: %s", sa.secOpts.CAEndpoint, caCertFile)
 
-
-			sa.RootCert = rootCert
+				sa.RootCert = rootCert
+			}
 		}
+
 		// Will use TLS unless the reserved 15010 port is used ( istiod on an ipsec/secure VPC)
 		// rootCert may be nil - in which case the system roots are used, and the CA is expected to have public key
 		// Otherwise assume the injection has mounted /etc/certs/root-cert.pem

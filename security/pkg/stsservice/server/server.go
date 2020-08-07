@@ -24,7 +24,6 @@ import (
 	"net/http/httputil"
 
 	"istio.io/istio/security/pkg/stsservice"
-	"istio.io/pkg/env"
 	"istio.io/pkg/log"
 )
 
@@ -42,11 +41,6 @@ const (
 )
 
 var stsServerLog = log.RegisterScope("stsserver", "STS service debugging", 0)
-
-var (
-	stsDirect = env.RegisterBoolVar("STS_DIRECT", true,
-		"Return the original token - to allow envoy to use the K8S token directly")
-)
 
 // error code sent in a STS error response. A full list of error code is
 // defined in https://tools.ietf.org/html/rfc6749#section-5.2.
@@ -115,9 +109,10 @@ func (s *Server) ServeStsRequests(w http.ResponseWriter, req *http.Request) {
 		s.sendErrorResponse(w, invalidRequest, validationError)
 		return
 	}
-	// Authentication using the original JWT.
+	// Authentication using the original JWT - Google requests use a Scope.
+	// This is used for authenticating directly with the token, for XDS/Citadel
 	if reqParam.Scope == "" {
-		stsServerLog.Infoa("STS local request: ", reqParam)
+		stsServerLog.Infoa("STS local request: ", reqParam.Audience)
 		tokInfo := &stsservice.StsResponseParameters{
 			AccessToken: reqParam.SubjectToken,
 			TokenType:   "Bearer",
@@ -138,7 +133,7 @@ func (s *Server) ServeStsRequests(w http.ResponseWriter, req *http.Request) {
 		s.sendErrorResponse(w, invalidTarget, genError)
 		return
 	}
-	stsServerLog.Infoa("STS request: ", reqParam)
+	stsServerLog.Infoa("STS request: ", reqParam.Scope)
 	s.sendSuccessfulResponse(w, tokenDataJSON)
 }
 

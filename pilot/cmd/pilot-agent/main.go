@@ -406,7 +406,7 @@ var (
 				DisableReportCalls:  disableInternalTelemetry,
 				OutlierLogPath:      outlierLogPath,
 				PilotCertProvider:   pilotCertProvider,
-				ProvCert:            citadel.ProvCert,
+				ProvCert:            sa.FindRootCAForXDS(),
 				Sidecar:             role.Type == model.SidecarProxy,
 			})
 

@@ -112,12 +112,20 @@ func NewASMExporter(pe *ocprom.Exporter) (*ASMExporter, error) {
 						configuration: cloudRunConfigVar.Get(),
 					}
 			} else {
+				pod := podNameVar.Get()
+				ns := podNamespaceVar.Get()
+				if cloudRunRevisionVar.Get() != "" {
+					// TODO: extract customer project, cluster from the mangled service name
+					// For regular Istiod it reports the project where Istiod is running.
+					pod = cloudRunRevisionVar.Get()
+					ns = cloudRunServiceVar.Get()
+				}
 				mr = &monitoredresource.GKEContainer{
 						ProjectID:                  gcpMetadata[platform.GCPProject],
 						ClusterName:                gcpMetadata[platform.GCPCluster],
 						Zone:                       gcpMetadata[platform.GCPLocation],
-						NamespaceID:                podNamespaceVar.Get(),
-						PodID:                      podNameVar.Get(),
+						NamespaceID:                ns,
+						PodID:                      pod,
 						ContainerName:              "discovery",
 						LoggingMonitoringV2Enabled: true,
 					}
@@ -151,6 +159,12 @@ func NewASMExporter(pe *ocprom.Exporter) (*ASMExporter, error) {
 		MonitoredResource: mr,
 		DefaultMonitoringLabels: labels,
 		ReportingInterval:       60 * time.Second,
+		OnError: func(err error) {
+			if strings.Contains(err.Error(), "One or more TimeSeries could not be written") {
+				return
+			}
+			log.Warnf("Stackdriver error %v", err)
+		},
 	})
 
 	if err != nil {
