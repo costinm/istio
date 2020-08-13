@@ -28,13 +28,13 @@ const (
 )
 
 func (s *Server) initSecureWebhookServer(args *PilotArgs) {
+	log.Info("initializing secure webhook server for istiod webhooks")
+	// create the https server for hosting the k8s injectionWebhook handlers.
 	if s.kubeClient == nil || args.ServerOptions.HTTPSAddr == "OFF" {
-		s.httpsMux = s.httpMux
+		s.httpsMux = s.readinessMux
 		return
 	}
 
-	log.Info("initializing secure webhook server for istiod webhooks")
-	// create the https server for hosting the k8s injectionWebhook handlers.
 	s.httpsMux = http.NewServeMux()
 	s.httpsServer = &http.Server{
 		Addr:    args.ServerOptions.HTTPSAddr,
