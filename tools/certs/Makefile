@@ -2,8 +2,8 @@
 .PRECIOUS: %/ca-key.pem %/ca-cert.pem %/cert-chain.pem
 .PRECIOUS: %/selfSigned-ca-key.pem %/selfSigned-ca-cert.pem %/selfSigned-ca-cert-chain.pem
 .PRECIOUS: %/selfSigned-workload-cert-chain.pem %/selfSigned-workload-cert.pem
-.PRECIOUS: %/workload-cert.pem %/key.pem %/workload-cert-chain.pem
-#.SECONDARY: root-cert.csr root-ca.conf %/cluster-ca.csr %/intermediate.conf
+.PRECIOUS: %/workload-cert.pem %/key.pem %/workload-cert-chain.pem %/vm-workload-cert.pem
+.SECONDARY: root-cert.csr root-ca.conf %/cluster-ca.csr %/intermediate.conf
 
 .DEFAULT_GOAL := help
 
@@ -225,14 +225,63 @@ root-key.pem:
 	@echo "CN = $(INTERMEDIATE_CN)" >> $@
 	@echo "L = $(L:/=)" >> $@
 #------------------------------------------------------------------------
-##<namespace>-certs-selfSigned: generate intermediate certificates and sign certificates for a virtual machine connected to the namespace `<namespace> using serviceAccount `$SERVICE_ACCOUNT` using self signed root certs.
-.PHONY: %-certs-selfSigned
+# VM certs, using K8S existing root
 
-%-certs-selfSigned: %/selfSigned-workload-cert-chain.pem root-cert.pem
+%-certs-vm: %/vm-workload-cert.pem
 	@make clean
 	@echo "done"
 
-%/selfSigned-workload-cert-chain.pem: root-cert.pem %/selfSigned-ca-cert.pem %/selfSigned-workload-cert.pem	
+%/vm-workload-cert.pem: %/vm-workload.csr  k8s-root-cert.pem k8s-root-key.pem
+	@echo "generating $@"
+	@openssl x509 -req -days $(WORKLOAD_DAYS) \
+		-CA k8s-root-cert.pem  -CAkey k8s-root-key.pem -CAcreateserial\
+		-extensions req_ext -extfile $(dir $<)/vm-workload.conf \
+		-in $< -out $@
+
+%/vm-workload.csr: L=$(dir $@)
+%/vm-workload.csr: %/key.pem %/vm-workload.conf
+	@echo "generating $@"
+	@openssl req -new -config $(L)/vm-workload.conf -key $< -out $@
+
+%/key.pem:
+	@echo "generating $@"
+	@mkdir -p $(dir $@)
+	@openssl genrsa -out $@ 4096
+
+%/vm-workload.conf: L=$(dir $@)
+%/vm-workload.conf:
+	@echo "[ req ]" > $@
+	@echo "encrypt_key = no" >> $@
+	@echo "prompt = no" >> $@
+	@echo "utf8 = yes" >> $@
+	@echo "default_md = sha256" >> $@
+	@echo "default_bits = $(INTERMEDIATE_KEYSZ)" >> $@
+	@echo "req_extensions = req_ext" >> $@
+	@echo "x509_extensions = req_ext" >> $@
+	@echo "distinguished_name = req_dn" >> $@
+	@echo "[ req_ext ]" >> $@
+	@echo "subjectKeyIdentifier = hash" >> $@
+	@echo "basicConstraints = critical, CA:false" >> $@
+	@echo "keyUsage = digitalSignature, keyEncipherment" >> $@
+	@echo "extendedKeyUsage = serverAuth, clientAuth" >> $@
+	@echo "subjectAltName=@san" >> $@
+	@echo "[ san ]" >> $@
+	@echo "URI.1 = spiffe://cluster.local/ns/$(L)sa/$(SERVICE_ACCOUNT)" >> $@
+	@echo "[ req_dn ]" >> $@
+	@echo "O = $(INTERMEDIATE_ORG)" >> $@
+	@echo "CN = $(WORKLOAD_CN)" >> $@
+	@echo "L = $(L:/=)" >> $@
+
+
+#------------------------------------------------------------------------
+##<namespace>-certs-selfSigned: generate intermediate certificates and sign certificates for a virtual machine connected to the namespace `<namespace> using serviceAccount `$SERVICE_ACCOUNT` using self signed root certs.
+.PHONY: %-certs-selfSigned
+
+%-certs-selfSigned: %/selfSigned-workload-cert-chain.pem
+	@make clean
+	@echo "done"
+
+%/selfSigned-workload-cert-chain.pem:  %/selfSigned-ca-cert.pem %/selfSigned-workload-cert.pem
 	@echo "generating $@"
 	@cat $^ > $@
 	@echo "Intermediate and workload certs stored in $(dir $<)"
@@ -321,11 +370,12 @@ CA_ADDR ?= istiod.istio-system.svc:15012
       	 base64 -d > root-cert.pem
 
 # Get a cert from the CA, using the token. Alternative to downloading the root CA and generating the cert locally.
+%/token-cert: D=$(realpath $(firstword $(MAKEFILE_LIST)))/..
 %/token-cert: %/workload.csr %/token
 	echo -n '{"csr": "' >$(dir $@)/csr-escaped
 	cat  $< | awk -F'\\n' '{printf "%s\\n",$$0} END {print "\"}"}'  >> $(dir $@)/csr-escaped
-	cat $(dir $@)csr-escaped | grpcurl  -import-path /work/security/proto/ \
-        -proto /work/security/proto/istioca.proto -use-reflection=false \
+	cat $(dir $@)csr-escaped | grpcurl  -import-path ${D} \
+        -proto ${D}/ca.proto -insecure -authority istiod.istio-system.svc -use-reflection=false \
          -d @ -H "Authorization:  Bearer $(shell cat $(dir $@)istio-token )" \
          ${CA_ADDR} istio.v1.auth.IstioCertificateService/CreateCertificate > $(dir $@)/cert.json
 	cat default/cert.json |jq .certChain[0] | sed 's/\\n/\n/g' | sed 's/"//' > $(dir $@)/workload-cert.pem
