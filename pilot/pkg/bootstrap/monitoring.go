@@ -114,7 +114,7 @@ func (m *monitor) Close() error {
 func (s *Server) initMonitor(addr string) error { //nolint: unparam
 	s.addStartFunc(func(stop <-chan struct{}) error {
 		gcpmonitoring.SetTrustDomain(s.environment.Mesh().TrustDomain)
-		monitor, err := startMonitor(addr, s.httpMux)
+		monitor, err := startMonitor(addr, s.monitoringMux)
 		if err != nil {
 			return err
 		}
