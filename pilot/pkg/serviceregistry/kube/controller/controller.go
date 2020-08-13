@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hashicorp/go-multierror"
 	"github.com/yl2chen/cidranger"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -27,9 +28,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	listerv1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
-
-	"istio.io/pkg/log"
-	"istio.io/pkg/monitoring"
 
 	"istio.io/istio/pilot/pkg/model"
 	"istio.io/istio/pilot/pkg/networking/util"
@@ -41,6 +39,8 @@ import (
 	"istio.io/istio/pkg/config/protocol"
 	kubelib "istio.io/istio/pkg/kube"
 	"istio.io/istio/pkg/queue"
+	"istio.io/pkg/log"
+	"istio.io/pkg/monitoring"
 )
 
 const (
@@ -216,6 +216,8 @@ type Controller struct {
 
 	// Network name for the registry as specified by the MeshNetworks configmap
 	networkForRegistry string
+
+	once sync.Once
 }
 
 // NewController creates a new Kubernetes controller
@@ -404,20 +406,25 @@ func registerHandlers(informer cache.SharedIndexInformer, q queue.Instance, otyp
 		}
 	}
 
+	wrappedHandler := func(obj interface{}, event model.Event) error {
+		obj = tryGetLatestObject(informer, obj)
+		return handler(obj, event)
+	}
+
 	informer.AddEventHandler(
 		cache.ResourceEventHandlerFuncs{
 			// TODO: filtering functions to skip over un-referenced resources (perf)
 			AddFunc: func(obj interface{}) {
 				incrementEvent(otype, "add")
 				q.Push(func() error {
-					return handler(obj, model.EventAdd)
+					return wrappedHandler(obj, model.EventAdd)
 				})
 			},
 			UpdateFunc: func(old, cur interface{}) {
 				if !filter(old, cur) {
 					incrementEvent(otype, "update")
 					q.Push(func() error {
-						return handler(cur, model.EventUpdate)
+						return wrappedHandler(cur, model.EventUpdate)
 					})
 				} else {
 					incrementEvent(otype, "updatesame")
@@ -432,6 +439,24 @@ func registerHandlers(informer cache.SharedIndexInformer, q queue.Instance, otyp
 		})
 }
 
+// tryGetLatestObject attempts to fetch the latest version of the object from the cache.
+// Changes may have occurred between queuing and processing.
+func tryGetLatestObject(informer cache.SharedIndexInformer, obj interface{}) interface{} {
+	key, err := cache.MetaNamespaceKeyFunc(obj)
+	if err != nil {
+		log.Warnf("failed creating key for informer object: %v", err)
+		return obj
+	}
+
+	latest, exists, err := informer.GetIndexer().GetByKey(key)
+	if !exists || err != nil {
+		log.Warnf("couldn't find %q in informer index", key)
+		return obj
+	}
+
+	return latest
+}
+
 // HasSynced returns true after the initial state synchronization
 func (c *Controller) HasSynced() bool {
 	if !c.serviceInformer.HasSynced() ||
@@ -440,7 +465,60 @@ func (c *Controller) HasSynced() bool {
 		!c.nodeInformer.HasSynced() {
 		return false
 	}
+
+	// after informer caches sync the first time, process resources in order
+	c.once.Do(func() {
+		if err := c.SyncAll(); err != nil {
+			log.Errorf("one or more errors force-syncing resources: %v", err)
+		}
+	})
+
 	return true
+}
+
+// SyncAll syncs all the objects node->service->pod->endpoint in order
+// TODO: sync same kind of objects in parallel
+// This can cause great performance cost in multi clusters scenario.
+// Maybe just sync the cache and trigger one push at last.
+func (c *Controller) SyncAll() error {
+	var err *multierror.Error
+
+	nodes := c.nodeInformer.GetStore().List()
+	log.Debugf("initializing %d nodes", len(nodes))
+	for _, s := range nodes {
+		err = multierror.Append(err, c.onNodeEvent(s, model.EventAdd))
+	}
+
+	services := c.serviceInformer.GetStore().List()
+	log.Debugf("initializing %d services", len(services))
+	for _, s := range services {
+		err = multierror.Append(err, c.onServiceEvent(s, model.EventAdd))
+	}
+
+	err = multierror.Append(err, c.syncPods())
+	err = multierror.Append(err, c.syncEndpoints())
+
+	return multierror.Flatten(err.ErrorOrNil())
+}
+
+func (c *Controller) syncPods() error {
+	var err *multierror.Error
+	pods := c.pods.informer.GetStore().List()
+	log.Debugf("initializing %d pods", len(pods))
+	for _, s := range pods {
+		err = multierror.Append(err, c.pods.onEvent(s, model.EventAdd))
+	}
+	return err.ErrorOrNil()
+}
+
+func (c *Controller) syncEndpoints() error {
+	var err *multierror.Error
+	endpoints := c.endpoints.getInformer().GetStore().List()
+	log.Debugf("initializing%d endpoints", len(endpoints))
+	for _, s := range endpoints {
+		err = multierror.Append(err, c.endpoints.onEvent(s, model.EventAdd))
+	}
+	return err.ErrorOrNil()
 }
 
 // Run all controllers until a signal is received
@@ -449,18 +527,8 @@ func (c *Controller) Run(stop <-chan struct{}) {
 		c.networksWatcher.AddNetworksHandler(c.reloadNetworkLookup)
 		c.reloadNetworkLookup()
 	}
-
-	go func() {
-		cache.WaitForCacheSync(stop, c.HasSynced)
-		c.queue.Run(stop)
-	}()
-
-	// To avoid endpoints without labels or ports, wait for sync.
-	cache.WaitForCacheSync(stop, c.nodeInformer.HasSynced,
-		c.pods.informer.HasSynced,
-		c.serviceInformer.HasSynced)
-
-	<-stop
+	cache.WaitForCacheSync(stop, c.HasSynced)
+	c.queue.Run(stop)
 	log.Infof("Controller terminated")
 }
 
@@ -865,7 +933,7 @@ func (c *Controller) WorkloadInstanceHandler(si *model.WorkloadInstance, event m
 				}
 			}
 			// fire off eds update
-			_ = c.xdsUpdater.EDSUpdate(c.clusterID, string(service.Hostname), service.Attributes.Namespace, endpoints)
+			c.xdsUpdater.EDSUpdate(c.clusterID, string(service.Hostname), service.Attributes.Namespace, endpoints)
 		}
 	}
 }

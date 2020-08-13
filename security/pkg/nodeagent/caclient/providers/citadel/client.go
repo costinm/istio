@@ -24,14 +24,14 @@ import (
 	"strings"
 
 	"google.golang.org/grpc/credentials/oauth"
-	"istio.io/istio/pkg/security"
-	"istio.io/pkg/env"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 
 	pb "istio.io/api/security/v1alpha1"
+	"istio.io/istio/pkg/security"
+	"istio.io/pkg/env"
 	"istio.io/pkg/log"
 )
 

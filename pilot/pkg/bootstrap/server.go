@@ -27,29 +27,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/soheilhy/cmux"
-	"google.golang.org/grpc/reflection"
-
-	"istio.io/istio/pilot/pkg/status"
-
-	v1 "k8s.io/client-go/kubernetes/typed/core/v1"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/cache"
-
-	"istio.io/istio/pilot/pkg/networking/apigen"
-	"istio.io/istio/pilot/pkg/networking/grpcgen"
-
 	middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	prometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	prom "github.com/prometheus/client_golang/prometheus"
+	"github.com/soheilhy/cmux"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
-
-	"istio.io/pkg/ctrlz"
-	"istio.io/pkg/filewatcher"
-	"istio.io/pkg/log"
-	"istio.io/pkg/version"
+	"google.golang.org/grpc/reflection"
+	v1 "k8s.io/client-go/kubernetes/typed/core/v1"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/cache"
 
 	"istio.io/istio/pilot/pkg/features"
 	"istio.io/istio/pilot/pkg/leaderelection"
@@ -60,8 +48,8 @@ import (
 	"istio.io/istio/pilot/pkg/serviceregistry/aggregate"
 	kubecontroller "istio.io/istio/pilot/pkg/serviceregistry/kube/controller"
 	"istio.io/istio/pilot/pkg/serviceregistry/serviceentry"
+	"istio.io/istio/pilot/pkg/status"
 	"istio.io/istio/pilot/pkg/xds"
-	v2 "istio.io/istio/pilot/pkg/xds/v2"
 	"istio.io/istio/pkg/config/constants"
 	"istio.io/istio/pkg/config/schema/collections"
 	"istio.io/istio/pkg/config/schema/gvk"
@@ -73,6 +61,10 @@ import (
 	"istio.io/istio/pkg/spiffe"
 	"istio.io/istio/security/pkg/k8s/chiron"
 	"istio.io/istio/security/pkg/pki/ca"
+	"istio.io/pkg/ctrlz"
+	"istio.io/pkg/filewatcher"
+	"istio.io/pkg/log"
+	"istio.io/pkg/version"
 )
 
 var (
@@ -179,10 +171,13 @@ type Server struct {
 // NewServer creates a new Server instance based on the provided arguments.
 func NewServer(args *PilotArgs) (*Server, error) {
 	e := &model.Environment{
-		ServiceDiscovery: aggregate.NewController(),
-		PushContext:      model.NewPushContext(),
-		DomainSuffix:     args.RegistryOptions.KubeOptions.DomainSuffix,
+		PushContext:  model.NewPushContext(),
+		DomainSuffix: args.RegistryOptions.KubeOptions.DomainSuffix,
 	}
+	ac := aggregate.NewController(aggregate.Options{
+		MeshHolder: e,
+	})
+	e.ServiceDiscovery = ac
 
 	s := &Server{
 		clusterID:       getClusterID(args),
@@ -227,7 +222,6 @@ func NewServer(args *PilotArgs) (*Server, error) {
 		return nil, err
 	}
 
-	s.initGenerators()
 	s.initJwtPolicy()
 
 	spiffe.SetTrustDomain(s.environment.Mesh().TrustDomain)
@@ -747,6 +741,9 @@ func (s *Server) waitForCacheSync(stop <-chan struct{}) bool {
 
 // cachesSynced checks whether caches have been synced.
 func (s *Server) cachesSynced() bool {
+	if s.multicluster != nil && !s.multicluster.HasSynced() {
+		return false
+	}
 	if !s.ServiceController().HasSynced() {
 		return false
 	}
@@ -1045,20 +1042,6 @@ func (s *Server) initNamespaceController(args *PilotArgs) {
 			return nil
 		})
 	}
-}
-
-// initGenerators initializes generators to be used by XDSServer.
-func (s *Server) initGenerators() {
-	s.XDSServer.Generators["grpc"] = &grpcgen.GrpcConfigGenerator{}
-	epGen := &xds.EdsGenerator{Server: s.XDSServer}
-	s.XDSServer.Generators["grpc/"+v2.EndpointType] = epGen
-	s.XDSServer.Generators["api"] = &apigen.APIGenerator{}
-	s.XDSServer.Generators["api/"+v2.EndpointType] = epGen
-	s.XDSServer.InternalGen = &xds.InternalGen{
-		Server: s.XDSServer,
-	}
-	s.XDSServer.Generators["api/"+xds.TypeURLConnections] = s.XDSServer.InternalGen
-	s.XDSServer.Generators["event"] = s.XDSServer.InternalGen
 }
 
 // initJwtPolicy initializes JwtPolicy.
