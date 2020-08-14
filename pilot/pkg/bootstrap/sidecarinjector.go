@@ -32,29 +32,27 @@ const (
 )
 
 var (
-	injectionEnabled = env.RegisterBoolVar("INJECT_ENABLED", true,
-		"Enable mutating webhook handler.")
+	injectionEnabled = env.RegisterBoolVar("INJECT_ENABLED", true, "Enable mutating webhook handler.")
 )
 
 func (s *Server) initSidecarInjector(args *PilotArgs) (*inject.Webhook, error) {
 	// currently the constant: "./var/lib/istio/inject"
 	injectPath := args.InjectionOptions.InjectionDirectory
 	if injectPath == "" || !injectionEnabled.Get() {
-		log.Infof("Skipping sidecar injector, injection path is missing")
+		log.Infof("Skipping sidecar injector, injection path is missing or disabled.")
 		return nil, nil
 	}
 
 	// If the injection path exists, we will set up injection
-	fp := filepath.Join(injectPath, "config")
-	if _, err := os.Stat(fp); os.IsNotExist(err) {
-		log.Infoa("Skipping sidecar injector, template not found ", fp)
+	if _, err := os.Stat(filepath.Join(injectPath, "config")); os.IsNotExist(err) {
+		log.Infof("Skipping sidecar injector, template not found")
 		return nil, nil
 	}
 
 	log.Info("initializing sidecar injector")
 
 	parameters := inject.WebhookParameters{
-		ConfigFile: fp,
+		ConfigFile: filepath.Join(injectPath, "config"),
 		ValuesFile: filepath.Join(injectPath, "values"),
 		Env:        s.environment,
 		// Disable monitoring. The injection metrics will be picked up by Pilots metrics exporter already

@@ -143,12 +143,6 @@ type WebhookParameters struct {
 	Revision string
 }
 
-// TODO:
-// - formally define the URL format - including cluster, network
-// - include the revision in the URL
-// - use Istiod configmap watcher to load per-revision template
-// - formalize the set of values available in injection template, treat it as a stable/versioned API.
-
 // NewWebhook creates a new instance of a mutating webhook for automatic sidecar injection.
 func NewWebhook(p WebhookParameters) (*Webhook, error) {
 	if p.Mux == nil {

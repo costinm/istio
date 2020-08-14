@@ -89,6 +89,7 @@ var (
 )
 
 func init() {
+
 	serverArgs = bootstrap.NewPilotArgs(func(p *bootstrap.PilotArgs) {
 		// Set Defaults
 		p.CtrlZOptions = ctrlz.DefaultOptions()

@@ -42,6 +42,8 @@ type jwtPayload struct {
 	Aud []string `json:"aud"`
 }
 
+// checkAudience detects if the token has an audience or is a 1st party JWT.
+// This allows migration and interop - we need to accept both.
 func checkAudience(jwt string) bool {
 	jwtSplit := strings.Split(jwt, ".")
 	if len(jwtSplit) != 3 {

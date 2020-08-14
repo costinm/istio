@@ -350,7 +350,7 @@ func (sa *Agent) newWorkloadSecretCache() (workloadSecretCache *cache.SecretCach
 		caClient, err = gca.NewGoogleCAClient(sa.secOpts.CAEndpoint, true)
 		sa.secOpts.PluginNames = []string{"GoogleTokenExchange"}
 		gcpInfo := tokenmanager.GetGCPProjectInfo()
-		if gcpInfo.Number != "" {
+		if stsclient.GKEClusterURL == "" && gcpInfo.Number != "" {
 			stsclient.GKEClusterURL = gcpInfo.GKEClusterURL()
 		}
 		if stsclient.GKEClusterURL == "" {

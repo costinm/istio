@@ -140,14 +140,6 @@ type Options struct {
 	// Set using "PROV_CERT" environment. If no private key/certificate is found, token will be used.
 	ProvCert string
 
-	// FileMountedCerts indicates whether the proxy is using file
-	// mounted certs created by a foreign CA. Refresh is managed by the external
-	// CA, by updating the Secret or VM file. We will watch the file for changes
-	// or check before the cert expires. This assumes the certs are in the
-	// well-known ./etc/certs location.
-	FileMountedCerts bool
-
-	// -----------------
 
 	// ClusterID is the cluster where the agent resides.
 	// Normally initialized from ISTIO_META_CLUSTER_ID - after a tortuous journey it
@@ -159,6 +151,13 @@ type Options struct {
 	// The type of Elliptical Signature algorithm to use
 	// when generating private keys. Currently only ECDSA is supported.
 	ECCSigAlg string
+
+	// FileMountedCerts indicates whether the proxy is using file
+	// mounted certs created by a foreign CA. Refresh is managed by the external
+	// CA, by updating the Secret or VM file. We will watch the file for changes
+	// or check before the cert expires. This assumes the certs are in the
+	// well-known ./etc/certs location.
+	FileMountedCerts bool
 
 	// PilotCertProvider is the provider of the Pilot certificate (PILOT_CERT_PROVIDER env)
 	// Determines the root CA file to use for connecting to CA gRPC:

@@ -131,7 +131,7 @@ func (c *citadelClient) getTLSDialOption() (grpc.DialOption, error) {
 		if !ok {
 			return nil, fmt.Errorf("failed to append certificates")
 		}
-		citadelClientLog.Warna("Citadel client using custom root: ", c.caEndpoint, " ", string(c.caTLSRootCert))
+		citadelClientLog.Infof("Citadel client using custom root: ", c.caEndpoint, " ", string(c.caTLSRootCert))
 	}
 	var certificate tls.Certificate
 	config := tls.Config{

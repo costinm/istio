@@ -25,10 +25,9 @@ import (
 )
 
 const (
-	bearerTokenPrefix  = "Bearer "
-	bearerTokenPrefix2 = "bearer "
-	authorizationMeta  = "authorization"
-	clusterIDMeta      = "clusterid"
+	bearerTokenPrefix = "Bearer "
+	authorizationMeta = "authorization"
+	clusterIDMeta     = "clusterid"
 
 	ClientCertAuthenticatorType = "ClientCertAuthenticator"
 )

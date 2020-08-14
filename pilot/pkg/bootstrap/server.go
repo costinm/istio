@@ -341,7 +341,6 @@ func (s *Server) Start(stop <-chan struct{}) error {
 				return
 			}
 			log.Infof("starting secure gRPC discovery service at %s", s.SecureGrpcListener.Addr())
-			reflection.Register(s.secureGrpcServer)
 			if err := s.secureGrpcServer.Serve(s.SecureGrpcListener); err != nil {
 				log.Errorf("error from GRPC server: %v", err)
 			}
@@ -353,11 +352,9 @@ func (s *Server) Start(stop <-chan struct{}) error {
 		if s.GRPCListener == nil {
 			return // listener is off - using handler
 		}
-		log.Infoa("Startup callbacks done, starting GRPC")
 		if !s.waitForCacheSync(stop) {
 			return
 		}
-		reflection.Register(s.grpcServer)
 		log.Infof("starting gRPC discovery service at %s", s.GRPCListener.Addr())
 		if err := s.grpcServer.Serve(s.GRPCListener); err != nil {
 			log.Warna(err)
@@ -479,15 +476,16 @@ func (s *Server) initIstiodAdminServer(args *PilotArgs, wh *inject.Webhook) erro
 			return fmt.Errorf("error initializing monitor: %v", err)
 		}
 	}
+
 	// Readiness Handler.
 	s.readinessMux.HandleFunc("/ready", s.istiodReadyHandler)
 
-	// Experiment:
-	if true {
-	m := cmux.New(listener)
+	// This happens only if the GRPC port (15010) is disabled. We will multiplex it on the HTTP port.
+	// Does not impact the HTTPS gRPC or HTTPS.
+	if s.GRPCListener == nil {
+		m := cmux.New(listener)
 		s.GRPCListener = m.Match(cmux.HTTP2HeaderField("content-type", "application/grpc"))
 		s.HTTPListener = m.Match(cmux.Any())
-		//s.CMUX = m
 		go m.Serve()
 	} else {
 		s.HTTPListener = listener
@@ -498,7 +496,7 @@ func (s *Server) initIstiodAdminServer(args *PilotArgs, wh *inject.Webhook) erro
 // initDiscoveryService intializes discovery server on plain text port.
 func (s *Server) initDiscoveryService(args *PilotArgs) error {
 	log.Infof("starting discovery service")
-	// Implement XdsServer grace shutdown
+	// Implement EnvoyXdsServer grace shutdown
 	s.addStartFunc(func(stop <-chan struct{}) error {
 		log.Infof("Starting ADS server")
 		s.XDSServer.Start(stop)
@@ -570,6 +568,7 @@ func (s *Server) initGrpcServer(options *istiokeepalive.Options) {
 	grpcOptions := s.grpcServerOptions(options)
 	s.grpcServer = grpc.NewServer(grpcOptions...)
 	s.XDSServer.Register(s.grpcServer)
+	reflection.Register(s.grpcServer)
 }
 
 // initDNSServer initializes gRPC DNS Server for DNS resolutions.
@@ -664,6 +663,7 @@ func (s *Server) initSecureDiscoveryService(args *PilotArgs) error {
 
 	s.secureGrpcServer = grpc.NewServer(opts...)
 	s.XDSServer.Register(s.secureGrpcServer)
+	reflection.Register(s.secureGrpcServer)
 
 	s.addStartFunc(func(stop <-chan struct{}) error {
 		go func() {

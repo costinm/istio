@@ -174,6 +174,8 @@ template: |
     {{- else }}
       value: istiod{{- if not (eq .Values.revision "") }}-{{ .Values.revision }}{{- end }}.{{ .Values.global.istioNamespace }}.svc:15012
     {{- end }}
+    - name: OUTPUT_CERTS
+      value: /etc/istio/proxy/
     - name: POD_NAME
       valueFrom:
         fieldRef:
