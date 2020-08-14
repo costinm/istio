@@ -15,6 +15,7 @@
 package gcpmonitoring
 
 import (
+	"context"
 	"errors"
 	"io/ioutil"
 	"strings"
@@ -26,6 +27,8 @@ import (
 	"contrib.go.opencensus.io/exporter/stackdriver/monitoredresource"
 	"go.opencensus.io/stats/view"
 	"google.golang.org/api/option"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/oauth"
 
 	"istio.io/istio/pilot/pkg/security/model"
 	"istio.io/istio/pkg/bootstrap/platform"
@@ -102,7 +105,7 @@ func NewASMExporter(pe *ocprom.Exporter) (*ASMExporter, error) {
 	clientOptions := []option.ClientOption{}
 
 
-				var mr monitoredresource.Interface
+	var mr monitoredresource.Interface
 		if svc := cloudRunServiceVar.Get(); svc != "" && false {
 				mr = &cloudRunRevision{
 						service:       svc,
@@ -114,12 +117,6 @@ func NewASMExporter(pe *ocprom.Exporter) (*ASMExporter, error) {
 			} else {
 				pod := podNameVar.Get()
 				ns := podNamespaceVar.Get()
-				if cloudRunRevisionVar.Get() != "" {
-					// TODO: extract customer project, cluster from the mangled service name
-					// For regular Istiod it reports the project where Istiod is running.
-					pod = cloudRunRevisionVar.Get()
-					ns = cloudRunServiceVar.Get()
-				}
 				mr = &monitoredresource.GKEContainer{
 						ProjectID:                  gcpMetadata[platform.GCPProject],
 						ClusterName:                gcpMetadata[platform.GCPCluster],
@@ -147,9 +144,12 @@ func NewASMExporter(pe *ocprom.Exporter) (*ASMExporter, error) {
 				}
 			}()
 		} else {
-			log.Errorf("Cannot read third party jwt token file: %v", err)
+			log.Errorf("Cannot read third party jwt token file, using default credentials %v", err)
+			gcred, _ := oauth.NewApplicationDefault(context.Background())
+			clientOptions = append(clientOptions, option.WithGRPCDialOption(grpc.WithPerRPCCredentials(gcred)), option.WithQuotaProject(gcpMetadata[platform.GCPProject]))
 		}
 	}
+	cnt := 0
 	se, err := stackdriver.NewExporter(stackdriver.Options{
 		MetricPrefix:            "istio.io/control",
 		MonitoringClientOptions: clientOptions,
@@ -161,6 +161,10 @@ func NewASMExporter(pe *ocprom.Exporter) (*ASMExporter, error) {
 		ReportingInterval:       60 * time.Second,
 		OnError: func(err error) {
 			if strings.Contains(err.Error(), "One or more TimeSeries could not be written") {
+				if cnt % 100 == 0 {
+					log.Warnf("Stackdriver error %v", err)
+				}
+				cnt++
 				return
 			}
 			log.Warnf("Stackdriver error %v", err)

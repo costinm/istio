@@ -129,8 +129,8 @@ type Server struct {
 	monitoringMux *http.ServeMux // debug, monitoring
 	// readinessMux listens on the httpAddr (8080). If a Gateway is used in front and https is off it is also multiplexing
 	// the rest of the features.
-	readinessMux  *http.ServeMux // readiness.
-	httpsMux      *http.ServeMux // webhooks
+	readinessMux *http.ServeMux // readiness.
+	httpsMux     *http.ServeMux // webhooks
 
 	HTTPListener       net.Listener
 	GRPCListener       net.Listener
@@ -269,9 +269,8 @@ func NewServer(args *PilotArgs) (*Server, error) {
 	if err := s.initRegistryEventHandlers(); err != nil {
 		return nil, fmt.Errorf("error initializing handlers: %v", err)
 	}
-	if err := s.initDiscoveryService(args); err != nil {
-		return nil, fmt.Errorf("error initializing discovery service: %v", err)
-	}
+
+	s.initDiscoveryService(args)
 
 	// TODO(irisdingbj):add integration test after centralIstiod finished
 	args.RegistryOptions.KubeOptions.FetchCaRoot = nil
@@ -450,7 +449,7 @@ func (s *Server) istiodReadyHandler(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// initIstiodHTTPServer initializes monitoring, debug and readiness end points.
+// initIstiodAdminServer initializes monitoring, debug and readiness end points.
 func (s *Server) initIstiodAdminServer(args *PilotArgs, wh *inject.Webhook) error {
 	log.Info("initializing Istiod admin server")
 	s.httpServer = &http.Server{
@@ -464,14 +463,14 @@ func (s *Server) initIstiodAdminServer(args *PilotArgs, wh *inject.Webhook) erro
 		return err
 	}
 
-	if args.ServerOptions.MonitoringAddr == "OFF" {
+	if args.ServerOptions.MonitoringAddr == "" {
 		s.monitoringMux = s.readinessMux
 	}
 	// Debug Server.
 	s.XDSServer.InitDebug(s.monitoringMux, s.ServiceController(), args.ServerOptions.EnableProfiling, wh)
 
 	// Monitoring Server.
-	if args.ServerOptions.MonitoringAddr != "OFF" {
+	if args.ServerOptions.MonitoringAddr != "" {
 		if err := s.initMonitor(args.ServerOptions.MonitoringAddr); err != nil {
 			return fmt.Errorf("error initializing monitor: %v", err)
 		}
@@ -480,26 +479,12 @@ func (s *Server) initIstiodAdminServer(args *PilotArgs, wh *inject.Webhook) erro
 	// Readiness Handler.
 	s.readinessMux.HandleFunc("/ready", s.istiodReadyHandler)
 
-	// This happens only if the GRPC port (15010) is disabled. We will multiplex it on the HTTP port.
-	// Does not impact the HTTPS gRPC or HTTPS.
-	if s.GRPCListener == nil {
-		m := cmux.New(listener)
-		s.GRPCListener = m.Match(cmux.HTTP2HeaderField("content-type", "application/grpc"))
-		s.HTTPListener = m.Match(cmux.Any())
-		go func() {
-			err := m.Serve()
-			if err != nil {
-				log.Warnf("Failed to listen on multiplexed port %v", err)
-			}
-		}()
-	} else {
-		s.HTTPListener = listener
-	}
+	s.HTTPListener = listener
 	return nil
 }
 
 // initDiscoveryService intializes discovery server on plain text port.
-func (s *Server) initDiscoveryService(args *PilotArgs) error {
+func (s *Server) initDiscoveryService(args *PilotArgs) {
 	log.Infof("starting discovery service")
 	// Implement EnvoyXdsServer grace shutdown
 	s.addStartFunc(func(stop <-chan struct{}) error {
@@ -509,16 +494,29 @@ func (s *Server) initDiscoveryService(args *PilotArgs) error {
 	})
 
 	s.initGrpcServer(args.KeepaliveOptions)
-	if args.ServerOptions.GRPCAddr == "OFF" {
-		return nil
+	if args.ServerOptions.GRPCAddr == "" {
+		return
 	}
 	grpcListener, err := net.Listen("tcp", args.ServerOptions.GRPCAddr)
 	if err != nil {
-		return err
+		log.Warnf("Failed to listen on gRPC port %v", err)
 	}
 	s.GRPCListener = grpcListener
 
-	return nil
+	// This happens only if the GRPC port (15010) is disabled. We will multiplex
+	// it on the HTTP port. Does not impact the HTTPS gRPC or HTTPS.
+	if s.GRPCListener == nil {
+		log.Info("multplexing gRPC on http port")
+		m := cmux.New(s.HTTPListener)
+		s.GRPCListener = m.Match(cmux.HTTP2HeaderField("content-type", "application/grpc"))
+		s.HTTPListener = m.Match(cmux.Any())
+		go func() {
+			err := m.Serve()
+			if err != nil {
+				log.Warnf("Failed to listen on multiplexed port %v", err)
+			}
+		}()
+	}
 }
 
 // Wait for the stop, and do cleanups
@@ -626,7 +624,7 @@ func (s *Server) initDNSTLSListener(dns string, tlsOptions TLSOptions) error {
 
 // initialize secureGRPCServer.
 func (s *Server) initSecureDiscoveryService(args *PilotArgs) error {
-	if args.ServerOptions.SecureGRPCAddr == "OFF" {
+	if args.ServerOptions.SecureGRPCAddr == "" {
 		log.Warnf("The secure discovery port is disabled")
 		return nil
 	}

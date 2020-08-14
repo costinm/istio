@@ -14,7 +14,7 @@ export VALIDATION_WEBHOOK_CONFIG_NAME=
 export INJECTION_WEBHOOK_CONFIG_NAME=
 
 # TODO: get secrets as well, maybe file from storage
-#export DISABLE_LEADER_ELECTION=true
+export DISABLE_LEADER_ELECTION=true
 
 export USE_TOKEN_FOR_CSR=true
 export USE_TOKEN_FOR_XDS=true
@@ -29,9 +29,10 @@ export CA_PROVIDER=${CA_PROVIDER:-istiod}
 export CA_ADDR=${CA_ADDR:-}
 
 # Emulate K8S - with one namespace per tenant
-export POD_NAMESPACE=${K_CONFIGURATION}
+export ASM_CONTROL_PLANE_POD_NAMESPACE=${K_CONFIGURATION}
 # Revision is equivalent with a deployment - unfortunately we can't get instance id.
-export POD_NAME=${K_REVISION}
+export POD_NAME=${K_REVISION}-$(date +%N)
+export ASM_CONTROL_PLANE_POD_NAME=${POD_NAME}
 
 # Test: see the IP, if unique we can add it to pod name
 ip addr
