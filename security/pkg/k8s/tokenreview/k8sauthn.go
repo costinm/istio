@@ -26,13 +26,19 @@ import (
 	k8sauth "k8s.io/api/authentication/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"istio.io/istio/pkg/jwt"
 )
 
 var (
 	// The default audience for SDS trustworthy JWT. This is to make sure that the CSR requests
 	// contain the JWTs intended for Citadel.
-	DefaultAudience = env.RegisterStringVar("TOKEN_AUDIENCE", "istio-ca", "Audience to check in accepted JWTW tokens")
 	RequireAudience = env.RegisterBoolVar("REQUIRE_AUDIENCE", false, "Reject tokens without audience. If false, K8S token will be accepted")
+
+	// TokenAudiences specifies a list of audiences for SDS trustworthy JWT. This is to make sure that the CSR requests
+	// contain the JWTs intended for Citadel.
+	TokenAudiences = strings.Split(env.RegisterStringVar("TOKEN_AUDIENCES", "istio-ca",
+		"A list of comma separated audiences to check in the JWT token before issuing a certificate. "+
+			"The token is accepted if it matches with one of the audiences").Get(), ",")
 )
 
 type jwtPayload struct {
@@ -78,7 +84,7 @@ func ValidateK8sJwt(kubeClient kubernetes.Interface, targetToken, jwtPolicy stri
 		},
 	}
 	if checkAudience(targetToken) || RequireAudience.Get() {
-		tokenReview.Spec.Audiences = []string{DefaultAudience.Get()}
+		tokenReview.Spec.Audiences = TokenAudiences
 		log.Infoa("Checking audience: ", tokenReview.Spec.Audiences)
 	}
 	reviewRes, err := kubeClient.AuthenticationV1().TokenReviews().Create(context.TODO(), tokenReview, metav1.CreateOptions{})

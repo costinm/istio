@@ -622,6 +622,17 @@ func (a *ADSC) handleRecv(closeOnExit bool) {
 			a.maybeSave(routes, "rds")
 			a.handleRDS(routes)
 		}
+
+		a.mutex.Lock()
+		if len(gvk) == 3 {
+			gt := resource.GroupVersionKind{Group: gvk[0], Version: gvk[1], Kind: gvk[2]}
+			a.sync[gt.String()] = time.Now()
+			a.syncCh <- gt.String()
+		}
+		a.Received[msg.TypeUrl] = msg
+		a.ack(msg)
+		a.mutex.Unlock()
+
 		select {
 		case a.XDSUpdates <- msg:
 		default:
@@ -1114,12 +1125,17 @@ func (a *ADSC) sendRsc(typeurl string, rsc []string) {
 
 func (a *ADSC) ack(msg *discovery.DiscoveryResponse) {
 	var resources []string
-	// TODO: Send routes also in future.
 	if msg.TypeUrl == v3.EndpointType {
 		for c := range a.edsClusters {
 			resources = append(resources, c)
 		}
 	}
+	if msg.TypeUrl == v3.RouteType {
+		for r := range a.routes {
+			resources = append(resources, r)
+		}
+	}
+
 	_ = a.stream.Send(&discovery.DiscoveryRequest{
 		ResponseNonce: msg.Nonce,
 		TypeUrl:       msg.TypeUrl,
