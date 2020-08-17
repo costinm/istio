@@ -111,8 +111,9 @@ export ENABLE_STACKDRIVER_MONITORING=${ENABLE_STACKDRIVER_MONITORING:-1}
 # built-in templates. Same for mesh config.
 
 exec /usr/local/bin/pilot-discovery discovery \
-   --httpsAddr OFF \
+   --httpsAddr "" \
    --trust-domain ${TRUST_DOMAIN} \
-   --secureGRPCAddr OFF \
-   --grpcAddr OFF \
+   --secureGRPCAddr "" \
+   --monitoringAddr "" \
+   --grpcAddr "" \
    ${EXTRA_ARGS} ${LOG_ARGS} $*

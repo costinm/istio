@@ -124,7 +124,15 @@ func (cl *Client) Run(stop <-chan struct{}) {
 	scope.Info("controller terminated")
 }
 
+var startupTime = time.Now()
+
 func (cl *Client) HasSynced() bool {
+	if time.Since(startupTime) > 10 * time.Second {
+		log.Infoa("Timeout waiting for caches, start for debug ")
+
+		return true
+	}
+
 	for kind, ctl := range cl.kinds {
 		if !ctl.informer.HasSynced() {
 			scope.Infof("controller %q is syncing...", kind)

@@ -16,6 +16,7 @@ package xds
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"strconv"
 	"sync/atomic"
@@ -100,6 +101,20 @@ type Event struct {
 	noncePrefix string
 }
 
+// XEventing is an experimental interface to propagate events. Currently implemented
+// by the primary controller.
+// TODO: support multicluster
+// TODO: better signature - needs to stay compatible with K8S Events
+type XEventing interface {
+	// IstiodEvent is an event associated with the Istiod tenant. Will be visible to all
+	// revisions. In K8S, it is associated with the tenant namespace ( since k8s tenant == namespace,
+	// and current istio deployment model has per-namespace granularity for secrets and access control).
+	IstiodEvent(ns, reason, msg string, warn bool)
+
+	// PodEvent is an event associated with a Pod - or VM equivalent.
+	PodEvent(ns, pod, reason, msg string, warn bool)
+}
+
 func newConnection(peerAddr string, stream DiscoveryStream) *Connection {
 	return &Connection{
 		pushChannel: make(chan *Event),
@@ -158,6 +173,13 @@ func (s *DiscoveryServer) receive(con *Connection, reqChannel chan *discovery.Di
 				if s.InternalGen != nil {
 					s.InternalGen.OnDisconnect(con)
 				}
+				if s.XEventing != nil {
+					// TODO: more info - actual instance of istiod, timestamp, etc.
+					s.XEventing.PodEvent(con.proxy.ConfigNamespace, con.proxy.Metadata.InstanceName,
+						"istio-disconnect",
+						con.ConID, false)
+				}
+
 			}()
 		}
 
@@ -477,6 +499,12 @@ func (s *DiscoveryServer) initConnection(node *core.Node, con *Connection) error
 	if s.InternalGen != nil {
 		s.InternalGen.OnConnect(con)
 	}
+	if s.XEventing != nil {
+		// TODO: more info - actual instance of istiod, timestamp, etc.
+		s.XEventing.PodEvent(con.proxy.ConfigNamespace, con.proxy.Metadata.InstanceName,
+			"istio-connect",
+			fmt.Sprintf("id=%s", con.ConID), false)
+	}
 	return nil
 }
 
@@ -495,6 +523,7 @@ func (s *DiscoveryServer) initProxy(node *core.Node) (*model.Proxy, error) {
 	if err != nil {
 		return nil, err
 	}
+	adsLog.Infoa("XXX Node info: ", node.Id, meta.InstanceName, node.Metadata)
 	// Update the config namespace associated with this proxy
 	proxy.ConfigNamespace = model.GetProxyConfigNamespace(proxy)
 

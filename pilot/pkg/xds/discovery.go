@@ -118,6 +118,8 @@ type DiscoveryServer struct {
 	// InternalGen is notified of connect/disconnect/nack on all connections
 	InternalGen *InternalGen
 
+	XEventing XEventing
+
 	// serverReady indicates caches have been synced up and server is ready to process requests.
 	serverReady bool
 
