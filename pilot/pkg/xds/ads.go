@@ -90,20 +90,6 @@ type Event struct {
 	done func()
 }
 
-// XEventing is an experimental interface to propagate events. Currently implemented
-// by the primary controller.
-// TODO: support multicluster
-// TODO: better signature - needs to stay compatible with K8S Events
-type XEventing interface {
-	// IstiodEvent is an event associated with the Istiod tenant. Will be visible to all
-	// revisions. In K8S, it is associated with the tenant namespace ( since k8s tenant == namespace,
-	// and current istio deployment model has per-namespace granularity for secrets and access control).
-	IstiodEvent(ns, reason, msg string, warn bool)
-
-	// PodEvent is an event associated with a Pod - or VM equivalent.
-	PodEvent(ns, pod, reason, msg string, warn bool)
-}
-
 func newConnection(peerAddr string, stream DiscoveryStream) *Connection {
 	return &Connection{
 		pushChannel: make(chan *Event),
@@ -512,7 +498,6 @@ func (s *DiscoveryServer) initProxy(node *core.Node) (*model.Proxy, error) {
 	if err != nil {
 		return nil, err
 	}
-	adsLog.Infoa("XXX Node info: ", node.Id, meta.InstanceName, node.Metadata)
 	// Update the config namespace associated with this proxy
 	proxy.ConfigNamespace = model.GetProxyConfigNamespace(proxy)
 

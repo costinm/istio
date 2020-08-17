@@ -321,7 +321,8 @@ func (c *Controller) onEvent(ev *v1.Event, s string) {
 		return
 	}
 	log.Infoa("KEvent ", s, " ",ev.Source,  ev.Namespace, ev.Count, ev.InvolvedObject, ev.Reason, ev.Message)
-
+	// TODO: update the PushContext/endpoint info - note that info from k8s eventing is not trusted, should be used for debug only 
+	// (until we add a signature). XDS and real pubsub will have authentication of the source.
 }
 
 func (c *Controller) Provider() serviceregistry.ProviderID {
