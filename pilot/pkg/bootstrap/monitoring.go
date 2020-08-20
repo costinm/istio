@@ -84,9 +84,7 @@ func startMonitor(addr string, mux *http.ServeMux) (*monitor, error) {
 	// is coming. that design will include proper coverage of statusz/healthz type
 	// functionality, in addition to how pilot reports its own metrics.
 	if err := addMonitor(mux); err != nil {
-		log.Errora("Failed to add monitor ", err)
-		return nil, nil
-		//return nil, fmt.Errorf("could not establish self-monitoring: %v", err)
+		return nil, fmt.Errorf("could not establish self-monitoring: %v", err)
 	}
 	if addr != "" {
 		m.monitoringServer = &http.Server{
@@ -108,11 +106,14 @@ func startMonitor(addr string, mux *http.ServeMux) (*monitor, error) {
 		<-m.shutdown
 	}
 
-
 	return m, nil
 }
 
 func (m *monitor) Close() error {
+	if m.monitoringServer == nil {
+		<-m.shutdown
+		return nil
+	}
 	err := m.monitoringServer.Close()
 	<-m.shutdown
 	return err
