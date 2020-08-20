@@ -23,7 +23,7 @@ REV ?= oss
 TAG ?= asm-cr
 
 # Hub for the proxy
-PROXY_HUB ?= costinm
+PROXY_HUB ?= grc.io/wlhe-cr
 
 # Setup the CloudRun Istiod revision
 knative/setup:
