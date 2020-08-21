@@ -5,28 +5,32 @@ env
 if [[ -n ${PROJECT} ]]; then
   echo gcloud container clusters get-credentials ${CLUSTER} --zone ${ZONE} --project ${PROJECT}
   gcloud container clusters get-credentials ${CLUSTER} --zone ${ZONE} --project ${PROJECT}
+  # TODO: check secret manager for a .kubeconfig - use it for non-GKE projects AND ingress secrets
+  # AND citadel root CA
 fi
 
-export ISTIOD_PORT=${ISTIOD_PORT:-443}
-
-# Disable webhook config patching - manual configs used, proper DNS certs means no cert patching.
+# Disable webhook config patching - manual configs used, proper DNS certs means no cert patching needed.
+# If running in KNative without a DNS cert - we may need it back, but we should require DNS certs.
+# Even if user doesn't have a DNS name - they can still use an self-signed root and add it to system trust,
+# to simplify
 export VALIDATION_WEBHOOK_CONFIG_NAME=
 export INJECTION_WEBHOOK_CONFIG_NAME=
 
-# TODO: get secrets as well, maybe file from storage
-export DISABLE_LEADER_ELECTION=true
+#export DISABLE_LEADER_ELECTION=true
 
+# No mTLS for control plane
 export USE_TOKEN_FOR_CSR=true
 export USE_TOKEN_FOR_XDS=true
 
-# Disable the DNS-over-TLS server
+# Disable the DNS-over-TLS server - no ports
 export DNS_ADDR=
 
+# TODO: parse service name and extra project, revision, cluster
+
 export REVISION=${REV:-managed}
+
+# TODO: should be auto-set now, verify safe to remove
 export GKE_CLUSTER_URL=https://container.googleapis.com/v1/projects/${PROJECT}/locations/${ZONE}/clusters/${CLUSTER}
-export TRUST_DOMAIN=${PROJECT}.svc.id.goog
-export CA_PROVIDER=${CA_PROVIDER:-istiod}
-export CA_ADDR=${CA_ADDR:-}
 
 # Emulate K8S - with one namespace per tenant
 export ASM_CONTROL_PLANE_POD_NAMESPACE=${K_CONFIGURATION}
@@ -38,19 +42,23 @@ export ASM_CONTROL_PLANE_POD_NAME=${POD_NAME}
 ip addr
 hostname
 
-if [[ "${ASM}" == "1" ]]; then
-  export STACKDRIVER=1
+if [[ "${CA}" == "1" ]]; then
   export CA_ADDR=meshca.googleapis.com:443
+  export TRUST_DOMAIN=${PROJECT}.svc.id.goog
+  export CA_PROVIDER=${CA_PROVIDER:-istiod}
+else
+  # If not set - the template default is a made-up istiod address instead of discovery.
+  # TODO: fix template
+  # TODO: if we fetch MeshConfig from cluster - leave trust domain untouched.
+  export CA_ADDR=${K_SERVICE}${ISTIOD_DOMAIN}:443
+  export TRUST_DOMAIN=cluster.local
+  export CA_PROVIDER=istiod
 fi
 
 # TODO:
 # - copy inject template and mesh config to cluster (first time) or from cluster
 # - revision support
-# - option to enable 'default' ingress class
-# - telemetry on stackdriver
-# - option for managed CA
-# - support non-GKE clusters - fetch a kubeconfig from secret manager
-# - set trustDomain to match managed CA by default ( no need for cluster.local )
+# - option to enable 'default' ingress class, remote install/control Gateway
 
 kubectl get ns istio-system
 if [[ "$?" != "0" ]]; then
@@ -60,6 +68,7 @@ if [[ "$?" != "0" ]]; then
   kubectl apply -f /var/lib/istio/config/gen-istio-cluster.yaml \
       --record=false --overwrite=false   --force-conflicts=true --server-side
 fi
+# TODO: check CRD revision, upgrade if needed.
 
 if [[ -n ${MESH} ]]; then
   echo ${MESH} > /etc/istio/config/mesh
@@ -68,6 +77,7 @@ else
   cat /etc/istio/config/mesh
 fi
 
+# TODO: fix OSS template to use only MeshConfig !
 cat /var/lib/istio/inject/values_template.yaml | envsubst > /var/lib/istio/inject/values
 
 # TODO: istio must watch it - no file reloading
@@ -77,7 +87,7 @@ if [[ "$?" != "0" ]]; then
   kubectl -n istio-system create cm istio-${REVISION} --from-file /etc/istio/config/mesh
 
   # Sidecars will report to stackdriver - requires proper setup.
-  if [[ "${STACKDRIVER}" == "1" ]]; then
+  if [[ "${ASM}" == "1" ]]; then
     cat /var/lib/istio/config/telemetry-sd.yaml | envsubst | kubectl apply -f -
   else
     # Prometheus only.
@@ -91,13 +101,13 @@ fi
 kubectl get mutatingwebhookconfiguration istiod-${REVISION}
 if [[ "$?" == "1" ]]; then
   echo "Mutating webhook missing, initializing"
-  # TODO: include the charts in the image !
   cat /var/lib/istio/inject/mutating_template.yaml | envsubst > /var/lib/istio/inject/mutating.yaml
   cat /var/lib/istio/inject/mutating.yaml
   kubectl apply -f /var/lib/istio/inject/mutating.yaml
 else
   echo "Mutating webhook found"
 fi
+
 echo Starting $*
 
 # What audience to expect for Citadel and XDS - currently using the non-standard format
@@ -106,9 +116,6 @@ export TOKEN_AUDIENCE=${TRUST_DOMAIN}
 
 # Istiod will report to stackdriver
 export ENABLE_STACKDRIVER_MONITORING=${ENABLE_STACKDRIVER_MONITORING:-1}
-
-# TODO: if injection template, injection values are present in the cluster, get them and use instead of the
-# built-in templates. Same for mesh config.
 
 exec /usr/local/bin/pilot-discovery discovery \
    --httpsAddr "" \
