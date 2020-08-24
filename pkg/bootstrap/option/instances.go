@@ -238,9 +238,7 @@ func ProvCert(value string) Instance {
 
 // CallCredentials will trigger the google_grpc XDS interface, with the given
 // call credentials.
-// access_token doesn't work - it's a literal token, rotation will not work
-//
-func CallCredentials(value string) Instance {
+func CallCredentials(value bool) Instance {
 	return newOption("call_credentials", value)
 }
 

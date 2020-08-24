@@ -115,8 +115,8 @@ func (cfg Config) toTemplateParams() (map[string]interface{}, error) {
 		option.PilotCertProvider(cfg.PilotCertProvider),
 		option.OutlierLogPath(cfg.OutlierLogPath),
 		option.ProvCert(cfg.ProvCert),
-		option.CallCredentials("1"))
-	option.DiscoveryHost(cfg.DiscoveryHost)
+		option.CallCredentials(true),
+		option.DiscoveryHost(cfg.DiscoveryHost))
 
 	if cfg.STSPort > 0 {
 		opts = append(opts,
