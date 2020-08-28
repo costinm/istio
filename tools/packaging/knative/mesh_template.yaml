@@ -10,7 +10,7 @@ defaultConfig:
     # Use tokens instead of MTLS
     CALL_CREDENTIALS: "true"
     XDS_ROOT_CA: /etc/ssl/certs/ca-certificates.crt
-    CAa_ROOT_CA: /etc/ssl/certs/ca-certificates.crt
+    CA_ROOT_CA: /etc/ssl/certs/ca-certificates.crt
   meshId: proj-${PROJECT_NUMBER}
   discoveryAddress: "${K_SERVICE}${ISTIOD_DOMAIN}:443"
   tracing: {}

@@ -53,7 +53,7 @@ else
   # TODO: if we fetch MeshConfig from cluster - leave trust domain untouched.
   export CA_ADDR=${K_SERVICE}${ISTIOD_DOMAIN}:443
   export TRUST_DOMAIN=cluster.local
-  export AUDIENCE=istio-ca
+  export AUDIENCE=${PROJECT}.svc.id.goog
   export CA_PROVIDER=istiod
 fi
 
@@ -114,7 +114,7 @@ echo Starting $*
 
 # What audience to expect for Citadel and XDS - currently using the non-standard format
 # TODO: use https://... - and separate token for stackdriver/managedCA
-export TOKEN_AUDIENCE=${TRUST_DOMAIN}
+export TOKEN_AUDIENCES=${PROJECT}.svc.id.goog,istio-ca
 
 # Istiod will report to stackdriver
 export ENABLE_STACKDRIVER_MONITORING=${ENABLE_STACKDRIVER_MONITORING:-1}
