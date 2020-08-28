@@ -45,6 +45,7 @@ hostname
 if [[ "${CA}" == "1" ]]; then
   export CA_ADDR=meshca.googleapis.com:443
   export TRUST_DOMAIN=${PROJECT}.svc.id.goog
+  export AUDIENCE=${TRUST_DOMAIN}
   export CA_PROVIDER=${CA_PROVIDER:-istiod}
 else
   # If not set - the template default is a made-up istiod address instead of discovery.
@@ -52,6 +53,7 @@ else
   # TODO: if we fetch MeshConfig from cluster - leave trust domain untouched.
   export CA_ADDR=${K_SERVICE}${ISTIOD_DOMAIN}:443
   export TRUST_DOMAIN=cluster.local
+  export AUDIENCE=istio-ca
   export CA_PROVIDER=istiod
 fi
 

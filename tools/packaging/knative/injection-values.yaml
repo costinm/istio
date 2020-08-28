@@ -1,20 +1,6 @@
-# Global and common settings for installing Istio.
-
-# This file is configured for a small scale production cluster.
-# Use user-values-medium or custom settings to tune up the CPU and scaling.
-# Additional values overrides can be used.
-
-# Each individual component will use values from this file, with defaults and 'advanced' settings included in
-# its own chart's values.yaml.
-
-# TODO: trim this file to commonly used settings, leave 'advanced' in the individual values.yaml (they can
-# still be overridden by users, but won't show in basic documentation.
-
-# This doesn't match istio defaults, which are more geared towards tests and bookinfo.
-logOutputLevel: default:info
-
-# Google specific
-gkeClusterURL: ${GKE_CLUSTER_URL}
+# Settings used during injection
+# Based on global.yaml/values.yaml - needs to be cleaned up
+# The remaining values that are actually used must move to mesh config
 
 global:
   # Used to locate istio-pilot.
@@ -314,7 +300,7 @@ global:
   omitSidecarInjectorConfigMap: false
   sds:
     token:
-      aud: ${TRUST_DOMAIN}
+      aud: ${AUDIENCE}
 
   sts:
     # The service port used by Security Token Service (STS) server to handle token exchange requests.
@@ -387,28 +373,26 @@ global:
   # Currently, two options are supported: "third-party-jwt" and "first-party-jwt".
   jwtPolicy: "third-party-jwt"
 
-# Internal setting - used when generating helm templates for kustomize.
-# clusterResources controls the inclusion of cluster-wide resources when generating the charts/installing.
-# For backward compat, it is set to 'true', resulting in the old-style installation.
-# When set to 'false', all cluster-wide resources will be omitted, and are expected to be installed
-# at the same time with the CRDs.
-clusterResources: true
 
-# Version is set as 'version' label and part of the resource names when installing.
-# It is used to support multiple version in same namespace, similar with normal app traffic shift.
-version: ""
+sidecarInjectorWebhook:
+  # You can use the field called alwaysInjectSelector and neverInjectSelector which will always inject the sidecar or
+  # always skip the injection on pods that match that label selector, regardless of the global policy.
+  # See https://istio.io/docs/setup/kubernetes/additional-setup/sidecar-injection/#more-control-adding-exceptions
+  neverInjectSelector: []
+  alwaysInjectSelector: []
 
-meshConfig:
-  enablePrometheusMerge: true
-  defaultConfig:
-    meshId: proj-${PROJECT_NUMBER}
-    proxyMetadata: {}
-    tracing:
-    #      tlsSettings:
-    #        mode: DISABLE # DISABLE, SIMPLE, MUTUAL, ISTIO_MUTUAL
-    #        clientCertificate: # example: /etc/istio/tracer/cert-chain.pem
-    #        privateKey:        # example: /etc/istio/tracer/key.pem
-    #        caCertificates:    # example: /etc/istio/tracer/root-cert.pem
-    #        sni:               # example: tracer.somedomain
-    #        subjectAltNames: []
-    # - tracer.somedomain
+  # injectedAnnotations are additional annotations that will be added to the pod spec after injection
+  # This is primarily to support PSP annotations. For example, if you defined a PSP with the annotations:
+  #
+  # annotations:
+  #   apparmor.security.beta.kubernetes.io/allowedProfileNames: runtime/default
+  #   apparmor.security.beta.kubernetes.io/defaultProfileName: runtime/default
+  #
+  # The PSP controller would add corresponding annotations to the pod spec for each container. However, this happens before
+  # the inject adds additional containers, so we must specify them explicitly here. With the above example, we could specify:
+  # injectedAnnotations:
+  #   container.apparmor.security.beta.kubernetes.io/istio-init: runtime/default
+  #   container.apparmor.security.beta.kubernetes.io/istio-proxy: runtime/default
+  injectedAnnotations: {}
+
+  rewriteAppHTTPProbe: true
