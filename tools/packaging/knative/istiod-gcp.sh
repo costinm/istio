@@ -1,7 +1,5 @@
 #!/bin/bash
 
-env
-
 if [[ -n ${PROJECT} ]]; then
   echo gcloud container clusters get-credentials ${CLUSTER} --zone ${ZONE} --project ${PROJECT}
   gcloud container clusters get-credentials ${CLUSTER} --zone ${ZONE} --project ${PROJECT}
@@ -16,6 +14,7 @@ fi
 export VALIDATION_WEBHOOK_CONFIG_NAME=
 export INJECTION_WEBHOOK_CONFIG_NAME=
 
+# No longer needed.
 #export DISABLE_LEADER_ELECTION=true
 
 # No mTLS for control plane
@@ -39,8 +38,8 @@ export POD_NAME=${K_REVISION}-$(date +%N)
 export ASM_CONTROL_PLANE_POD_NAME=${POD_NAME}
 
 # Test: see the IP, if unique we can add it to pod name
-ip addr
-hostname
+#ip addr
+#hostname
 
 if [[ "${CA}" == "1" ]]; then
   export CA_ADDR=meshca.googleapis.com:443
@@ -118,6 +117,8 @@ export TOKEN_AUDIENCES=${PROJECT}.svc.id.goog,istio-ca
 
 # Istiod will report to stackdriver
 export ENABLE_STACKDRIVER_MONITORING=${ENABLE_STACKDRIVER_MONITORING:-1}
+
+env
 
 exec /usr/local/bin/pilot-discovery discovery \
    --httpsAddr "" \
