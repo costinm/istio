@@ -1,6 +1,7 @@
 # Settings used during injection
 # Based on global.yaml/values.yaml - needs to be cleaned up
 # The remaining values that are actually used must move to mesh config
+logOutputLevel: default:info
 
 global:
   # Used to locate istio-pilot.
