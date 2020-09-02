@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
-	"istio.io/istio/pkg/adsc"
 	"istio.io/istio/security/pkg/nodeagent/plugin/providers/google/stsclient"
 
 	mesh "istio.io/api/mesh/v1alpha1"
@@ -35,7 +34,6 @@ import (
 	"istio.io/istio/security/pkg/nodeagent/cache"
 	citadel "istio.io/istio/security/pkg/nodeagent/caclient/providers/citadel"
 	gca "istio.io/istio/security/pkg/nodeagent/caclient/providers/google"
-	"istio.io/istio/security/pkg/nodeagent/plugin/providers/google/stsclient"
 	"istio.io/istio/security/pkg/nodeagent/sds"
 	"istio.io/istio/security/pkg/nodeagent/secretfetcher"
 	"istio.io/pkg/log"
@@ -158,7 +156,6 @@ func NewAgent(proxyConfig *mesh.ProxyConfig, cfg *AgentConfig,
 		proxyConfig: proxyConfig,
 		cfg:         cfg,
 		secOpts:     sopts,
-		stopCh:      make(chan struct{}),
 	}
 
 	// Fix the defaults - mainly for tests ( main uses env )

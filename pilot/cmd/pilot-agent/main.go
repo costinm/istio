@@ -298,7 +298,6 @@ var (
 			// Disable the secret eviction for istio agent.
 			secOpts.EvictionDuration = 0
 			secOpts.SkipParseToken = skipParseTokenEnv
-			secOpts.ProvCert = citadel.ProvCert
 
 			// TODO (liminw): CredFetcher is a general interface. In 1.7, we limit the use on GCE only because
 			// GCE is the only supported plugin at the moment.

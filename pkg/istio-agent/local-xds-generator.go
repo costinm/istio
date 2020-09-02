@@ -149,9 +149,9 @@ func (sa *Agent) startXDSGenerator(proxyConfig *meshconfig.ProxyConfig, secrets 
 	ads.Store = sa.localXDSGenerator.xdsServer.MemoryConfigStore
 	ads.Registry = sa.localXDSGenerator.xdsServer.DiscoveryServer.MemRegistry
 
-	go sa.xdsServer.DiscoveryServer.Start(sa.stopCh)
+	//go sa.xdsServer.DiscoveryServer.Start(sa.stopCh)
 	ads.Start()
-	sa.ADSC = ads
+	//sa.ADSC = ads
 
 	sa.localXDSGenerator.proxyGen.AddClient(ads)
 
