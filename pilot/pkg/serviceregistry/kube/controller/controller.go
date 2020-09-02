@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	klabels "k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -37,7 +38,6 @@ import (
 	"k8s.io/client-go/tools/record"
 
 	"istio.io/istio/pilot/pkg/model"
-	"istio.io/istio/pilot/pkg/networking/util"
 	"istio.io/istio/pilot/pkg/serviceregistry"
 	"istio.io/istio/pilot/pkg/serviceregistry/kube"
 	"istio.io/istio/pkg/config/host"
@@ -199,7 +199,6 @@ type Controller struct {
 	clusterID       string
 
 	serviceHandlers  []func(*model.Service, model.Event)
-	instanceHandlers []func(*model.ServiceInstance, model.Event)
 	workloadHandlers []func(*model.WorkloadInstance, model.Event)
 
 	// This is only used for test
@@ -321,7 +320,7 @@ func (c *Controller) onEvent(ev *v1.Event, s string) {
 		return
 	}
 	log.Infoa("KEvent ", s, " ",ev.Source,  ev.Namespace, ev.Count, ev.InvolvedObject, ev.Reason, ev.Message)
-	// TODO: update the PushContext/endpoint info - note that info from k8s eventing is not trusted, should be used for debug only 
+	// TODO: update the PushContext/endpoint info - note that info from k8s eventing is not trusted, should be used for debug only
 	// (until we add a signature). XDS and real pubsub will have authentication of the source.
 }
 
@@ -332,7 +331,6 @@ func (c *Controller) Provider() serviceregistry.ProviderID {
 func (c *Controller) Cluster() string {
 	return c.clusterID
 }
-
 // IstiodEvent is an event associated with a Istiod tenant. In K8S namespace is the tenancy unit - we may
 // not run deployments or services in the cluster (for example central istiod), but a namespace is expected.
 func (c *Controller) IstiodEvent(ns, reason, msg string, warn bool) {
@@ -361,6 +359,20 @@ func (c *Controller) IstiodEvent(ns, reason, msg string, warn bool) {
 	}
 
 	c.Recoder.Event(ref, evType, reason, msg)
+}
+
+func (c *Controller) Cleanup() error {
+	// TODO(landow) do we need to cleanup other things besides endpoint shards?
+	svcs, err := c.serviceLister.List(klabels.NewSelector())
+	if err != nil {
+		return fmt.Errorf("error listing services for deletion: %v", err)
+	}
+	for _, s := range svcs {
+		name := kube.ServiceHostname(s.Namespace, s.Namespace, c.domainSuffix)
+		c.xdsUpdater.SvcUpdate(c.clusterID, string(name), s.Namespace, model.EventDelete)
+		// TODO(landow) do we need to notify service handlers?
+	}
+	return nil
 }
 
 // PodEvent reports an event back to a Pod. Can be used with 'kubectl describe pod' or 'kubectl get events'.
@@ -1093,7 +1105,6 @@ func (c *Controller) getProxyServiceInstancesFromMetadata(proxy *model.Proxy) ([
 
 	out := make([]*model.ServiceInstance, 0)
 	for _, svc := range services {
-		svcAccount := proxy.Metadata.ServiceAccount
 		hostname := kube.ServiceHostname(svc.Name, svc.Namespace, c.domainSuffix)
 		c.RLock()
 		modelService, f := c.servicesMap[hostname]
@@ -1124,6 +1135,7 @@ func (c *Controller) getProxyServiceInstancesFromMetadata(proxy *model.Proxy) ([
 			}
 		}
 
+		epBuilder := NewEndpointBuilderFromMetadata(c, proxy)
 		for tp, svcPort := range tps {
 			// consider multiple IP scenarios
 			for _, ip := range proxy.IPAddresses {
@@ -1131,19 +1143,7 @@ func (c *Controller) getProxyServiceInstancesFromMetadata(proxy *model.Proxy) ([
 				out = append(out, &model.ServiceInstance{
 					Service:     modelService,
 					ServicePort: svcPort,
-					Endpoint: &model.IstioEndpoint{
-						Address:         ip,
-						EndpointPort:    uint32(tp.Port),
-						ServicePortName: svcPort.Name,
-						// Kubernetes service will only have a single instance of labels, and we return early if there are no labels.
-						Labels:         proxy.Metadata.Labels,
-						ServiceAccount: svcAccount,
-						Network:        c.endpointNetwork(ip),
-						Locality: model.Locality{
-							Label:     util.LocalityToString(proxy.Locality),
-							ClusterID: c.clusterID,
-						},
-					},
+					Endpoint:    epBuilder.buildIstioEndpoint(ip, int32(tp.Port), svcPort.Name),
 				})
 			}
 		}
@@ -1230,11 +1230,5 @@ func (c *Controller) AppendServiceHandler(f func(*model.Service, model.Event)) e
 // AppendWorkloadHandler implements a service catalog operation
 func (c *Controller) AppendWorkloadHandler(f func(*model.WorkloadInstance, model.Event)) error {
 	c.workloadHandlers = append(c.workloadHandlers, f)
-	return nil
-}
-
-// AppendInstanceHandler implements a service catalog operation
-func (c *Controller) AppendInstanceHandler(f func(*model.ServiceInstance, model.Event)) error {
-	c.instanceHandlers = append(c.instanceHandlers, f)
 	return nil
 }

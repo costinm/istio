@@ -51,8 +51,8 @@ import (
 	"istio.io/istio/pilot/pkg/networking/util"
 	"istio.io/istio/pilot/pkg/serviceregistry/memory"
 	v3 "istio.io/istio/pilot/pkg/xds/v3"
+	"istio.io/istio/pkg/config"
 	"istio.io/istio/pkg/config/schema/collections"
-	"istio.io/istio/pkg/config/schema/resource"
 	"istio.io/istio/pkg/security"
 	"istio.io/istio/security/pkg/nodeagent/cache"
 	"istio.io/pkg/log"
@@ -96,6 +96,10 @@ type Config struct {
 	// XDSRootCAFile explicitly set the root CA to be used for the XDS connection.
 	// Mirrors Envoy file.
 	XDSRootCAFile string
+
+	// RootCert contains the XDS root certificate. Used mainly for tests, apps will normally use
+	// XDSRootCAFile
+	RootCert []byte
 
 	// InsecureSkipVerify skips client verification the server's certificate chain and host name.
 	InsecureSkipVerify bool
@@ -312,7 +316,7 @@ func (a *ADSC) tlsConfig() (*tls.Config, error) {
 	if a.cfg.Secrets != nil {
 		tok, err := ioutil.ReadFile(a.cfg.JWTPath)
 		if err != nil {
-			log.Infof("Failed to get credential token: %v", err)
+			log.Infof("Failed to get credential token in agent: %v", err)
 			tok = []byte("")
 		}
 
@@ -326,6 +330,7 @@ func (a *ADSC) tlsConfig() (*tls.Config, error) {
 		if err != nil {
 			return nil, err
 		}
+		clientCerts = []tls.Certificate{clientCert}
 	} else if a.cfg.CertDir != "" {
 		certName = a.cfg.CertDir + "/cert-chain.pem"
 		clientCert, err = tls.LoadX509KeyPair(certName, a.cfg.CertDir+"/key.pem")
@@ -336,7 +341,9 @@ func (a *ADSC) tlsConfig() (*tls.Config, error) {
 	}
 
 	// Load the root CAs
-	if a.cfg.XDSRootCAFile != "" {
+	if a.cfg.RootCert != nil {
+		serverCABytes = a.cfg.RootCert
+	} else if a.cfg.XDSRootCAFile != "" {
 		serverCABytes, err = ioutil.ReadFile(a.cfg.XDSRootCAFile)
 	} else if a.cfg.Secrets != nil {
 		// This is a bit crazy - we could just use the file
@@ -401,40 +408,21 @@ func (a *ADSC) Close() {
 func (a *ADSC) connect() error {
 	var err error
 	opts := a.grpcOpts
-
-	if strings.HasSuffix(a.url, ":443") {
+	if len(a.cfg.CertDir) > 0 || a.cfg.Secrets != nil {
 		tlsCfg, err := a.tlsConfig()
 		if err != nil {
 			return err
 		}
 		creds := credentials.NewTLS(tlsCfg)
-		opts = append(opts, []grpc.DialOption{
-			grpc.WithTransportCredentials(creds),
-			grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: 20 * time.Second}),
-		}...)
-		a.conn, err = grpc.Dial(a.url, opts...)
-		if err != nil {
-			return err
-		}
-	} else if len(a.cfg.CertDir) > 0 || a.cfg.Secrets != nil {
-		tlsCfg, err := a.tlsConfig()
-		if err != nil {
-			return err
-		}
-		creds := credentials.NewTLS(tlsCfg)
-
 		opts = append(opts, grpc.WithTransportCredentials(creds))
-		a.conn, err = grpc.Dial(a.url, opts...)
-		if err != nil {
-			return err
-		}
-	} else {
-		a.conn, err = grpc.Dial(a.url, grpc.WithInsecure())
-		if err != nil {
-			return err
-		}
+	} else if len(opts) == 0 {
+		// Only disable transport security if the user didn't supply custom dial options
+		opts = append(opts, grpc.WithInsecure())
 	}
-
+	a.conn, err = grpc.Dial(a.url, opts...)
+	if err != nil {
+		return err
+	}
 	xds := discovery.NewAggregatedDiscoveryServiceClient(a.conn)
 	a.adsServiceClient = xds
 	edsstr, err := xds.StreamAggregatedResources(context.Background())
@@ -623,7 +611,7 @@ func (a *ADSC) handleRecv(closeOnExit bool) {
 
 		a.mutex.Lock()
 		if len(gvk) == 3 {
-			gt := resource.GroupVersionKind{Group: gvk[0], Version: gvk[1], Kind: gvk[2]}
+			gt := config.GroupVersionKind{Group: gvk[0], Version: gvk[1], Kind: gvk[2]}
 			a.sync[gt.String()] = time.Now()
 			a.syncCh <- gt.String()
 		}
@@ -637,7 +625,6 @@ func (a *ADSC) handleRecv(closeOnExit bool) {
 		}
 	}
 }
-
 func (a *ADSC) maybeSave(routes interface{}, name string) {
 	if a.LocalCacheDir != "" {
 		strResponse, err := json.MarshalIndent(routes, "  ", "  ")
@@ -650,12 +637,13 @@ func (a *ADSC) maybeSave(routes interface{}, name string) {
 	}
 }
 
-func mcpToPilot(m *mcp.Resource) (*model.Config, error) {
+
+func mcpToPilot(m *mcp.Resource) (*config.Config, error) {
 	if m == nil || m.Metadata == nil {
-		return &model.Config{}, nil
+		return &config.Config{}, nil
 	}
-	c := &model.Config{
-		ConfigMeta: model.ConfigMeta{
+	c := &config.Config{
+		Meta: config.Meta{
 			ResourceVersion: m.Metadata.Version,
 			Labels:          m.Metadata.Labels,
 			Annotations:     m.Metadata.Annotations,
@@ -750,7 +738,7 @@ func (a *ADSC) handleLDS(ll []*listener.Listener) {
 	a.tcpListeners = lt
 
 	select {
-	case a.Updates <- "lds":
+	case a.Updates <- v3.ListenerType:
 	default:
 	}
 }
@@ -846,7 +834,7 @@ func (a *ADSC) handleCDS(ll []*cluster.Cluster) {
 	a.clusters = cds
 
 	select {
-	case a.Updates <- "cds":
+	case a.Updates <- v3.ClusterType:
 	default:
 	}
 }
@@ -911,7 +899,7 @@ func (a *ADSC) handleEDS(eds []*endpoint.ClusterLoadAssignment) {
 	a.eds = la
 
 	select {
-	case a.Updates <- "eds":
+	case a.Updates <- v3.EndpointType:
 	default:
 	}
 }
@@ -953,7 +941,7 @@ func (a *ADSC) handleRDS(configurations []*route.RouteConfiguration) {
 	a.mutex.Unlock()
 
 	select {
-	case a.Updates <- "rds":
+	case a.Updates <- v3.RouteType:
 	default:
 	}
 
@@ -971,6 +959,33 @@ func (a *ADSC) WaitClear() {
 	}
 }
 
+// WaitSingle waits for a single resource, and fails if any other are returned
+func (a *ADSC) WaitSingle(to time.Duration, want string) error {
+	t := time.NewTimer(to)
+	for {
+		select {
+		case t := <-a.Updates:
+			if t == "" {
+				return fmt.Errorf("closed")
+			}
+			if t != want && shortTypeMap[t] != want {
+				return fmt.Errorf("wanted update for %v got %v/%v", want, t, shortTypeMap[t])
+			}
+			return nil
+		case <-t.C:
+			return fmt.Errorf("timeout, still waiting for update for %v", want)
+		}
+	}
+}
+
+// TODO stop using short types
+var shortTypeMap = map[string]string{
+	"cds": v3.ClusterType,
+	"lds": v3.ListenerType,
+	"rds": v3.RouteType,
+	"eds": v3.EndpointType,
+}
+
 // Wait for an updates for all the specified types
 // If updates is empty, this will wait for any update
 func (a *ADSC) Wait(to time.Duration, updates ...string) ([]string, error) {
@@ -982,32 +997,12 @@ func (a *ADSC) Wait(to time.Duration, updates ...string) ([]string, error) {
 	got := make([]string, 0, len(updates))
 	for {
 		select {
-		case t := <-a.Updates:
-			if t == "" {
+		case toDelete := <-a.Updates:
+			if toDelete == "" {
 				return got, fmt.Errorf("closed")
 			}
-			toDelete := t
-			// legacy names, still used in tests.
-			switch t {
-			case v3.ListenerType:
-				delete(want, "lds")
-			case v3.ClusterType:
-				delete(want, "cds")
-			case v3.EndpointType:
-				delete(want, "eds")
-			case v3.RouteType:
-				delete(want, "rds")
-			case "lds":
-				delete(want, v3.ListenerType)
-			case "cds":
-				delete(want, v3.ClusterType)
-			case "eds":
-				delete(want, v3.EndpointType)
-			case "rds":
-				delete(want, v3.RouteType)
-			}
 			delete(want, toDelete)
-			got = append(got, t)
+			got = append(got, toDelete)
 			if len(want) == 0 {
 				return got, nil
 			}
@@ -1207,7 +1202,7 @@ func (a *ADSC) handleMCP(gvk []string, rsc *any.Any, valBytes []byte) error {
 		adscLog.Warna("Invalid data ", err, " ", string(valBytes))
 		return err
 	}
-	val.GroupVersionKind = resource.GroupVersionKind{Group: gvk[0], Version: gvk[1], Kind: gvk[2]}
+	val.GroupVersionKind = config.GroupVersionKind{Group: gvk[0], Version: gvk[1], Kind: gvk[2]}
 	cfg := a.Store.Get(val.GroupVersionKind, val.Name, val.Namespace)
 	if cfg == nil {
 		_, err = a.Store.Create(*val)

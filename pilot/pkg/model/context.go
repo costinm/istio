@@ -141,7 +141,7 @@ type XdsUpdates = map[ConfigKey]struct{}
 // The server may associate a different generator based on client metadata. Different
 // WatchedResources may use same or different Generator.
 type XdsResourceGenerator interface {
-	Generate(proxy *Proxy, push *PushContext, w *WatchedResource, updates XdsUpdates) Resources
+	Generate(proxy *Proxy, push *PushContext, w *WatchedResource, updates *PushRequest) Resources
 }
 
 // Proxy contains information about an specific instance of a proxy (envoy sidecar, gateway,
@@ -464,8 +464,6 @@ type NodeMetadata struct {
 	TLSClientRootCert string `json:"TLS_CLIENT_ROOT_CERT,omitempty"`
 
 	CertBaseDir string `json:"BASE,omitempty"`
-	// SdsEnabled indicates if SDS is enabled or not. This is are set to "1" if true
-	SdsEnabled StringBool `json:"SDS,omitempty"`
 
 	// IdleTimeout specifies the idle timeout for the proxy, in duration format (10s).
 	// If not set, no timeout is set.
@@ -746,22 +744,18 @@ const UnnamedNetwork = ""
 // GetNetworkView returns the networks that the proxy requested.
 // When sending EDS/CDS-with-dns-endpoints, Pilot will only send
 // endpoints corresponding to the networks that the proxy wants to see.
-// If not set, we assume that the proxy wants to see endpoints from the default
-// unnamed network.
+// If not set, we assume that the proxy wants to see endpoints in any network.
 func GetNetworkView(node *Proxy) map[string]bool {
-	if node == nil {
-		return map[string]bool{UnnamedNetwork: true}
+	if node == nil || len(node.Metadata.RequestedNetworkView) == 0 {
+		return nil
 	}
 
 	nmap := make(map[string]bool)
 	for _, n := range node.Metadata.RequestedNetworkView {
 		nmap[n] = true
 	}
+	nmap[UnnamedNetwork] = true
 
-	if len(nmap) == 0 {
-		// Proxy sees endpoints from the default unnamed network only
-		nmap[UnnamedNetwork] = true
-	}
 	return nmap
 }
 

@@ -334,17 +334,6 @@ func (c *Controller) AppendServiceHandler(f func(*model.Service, model.Event)) e
 	return nil
 }
 
-// AppendInstanceHandler implements a service instance catalog operation
-func (c *Controller) AppendInstanceHandler(f func(*model.ServiceInstance, model.Event)) error {
-	for _, r := range c.GetRegistries() {
-		if err := r.AppendInstanceHandler(f); err != nil {
-			log.Infof("Fail to append instance handler to adapter %s", r.Provider())
-			return err
-		}
-	}
-	return nil
-}
-
 func (c *Controller) AppendWorkloadHandler(f func(*model.WorkloadInstance, model.Event)) error {
 	for _, r := range c.GetRegistries() {
 		if err := r.AppendWorkloadHandler(f); err != nil {
@@ -373,7 +362,7 @@ func (c *Controller) GetIstioServiceAccounts(svc *model.Service, ports []int) []
 			out[sa] = struct{}{}
 		}
 	}
-	result := []string{}
+	result := make([]string, 0, len(out))
 	for k := range out {
 		result = append(result, k)
 	}
@@ -385,7 +374,7 @@ func (c *Controller) GetIstioServiceAccounts(svc *model.Service, ports []int) []
 		}
 	}
 	expanded := spiffe.ExpandWithTrustDomains(result, tds)
-	result = []string{}
+	result = make([]string, 0, len(expanded))
 	for k := range expanded {
 		result = append(result, k)
 	}

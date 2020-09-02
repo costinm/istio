@@ -29,13 +29,13 @@ import (
 
 	mesh "istio.io/api/mesh/v1alpha1"
 	"istio.io/istio/pilot/pkg/security/model"
-	"istio.io/istio/pilot/pkg/xds"
 	"istio.io/istio/pkg/config/constants"
 	"istio.io/istio/pkg/kube"
 	"istio.io/istio/pkg/security"
 	"istio.io/istio/security/pkg/nodeagent/cache"
 	citadel "istio.io/istio/security/pkg/nodeagent/caclient/providers/citadel"
 	gca "istio.io/istio/security/pkg/nodeagent/caclient/providers/google"
+	"istio.io/istio/security/pkg/nodeagent/plugin/providers/google/stsclient"
 	"istio.io/istio/security/pkg/nodeagent/sds"
 	"istio.io/istio/security/pkg/nodeagent/secretfetcher"
 	"istio.io/pkg/log"
@@ -88,6 +88,9 @@ type Agent struct {
 	// May also be a https address.
 	SDSAddress string
 
+	// CertPath is set with the location of the certs, or empty if mounted certs are not present.
+	CertsPath string
+
 	// RootCert is the CA root certificate. It is loaded part of detecting the
 	// SDS operating mode - may be the Citadel CA, Kubernentes CA or a custom
 	// CA. If not set it should be assumed we are using a public certificate (like ACME).
@@ -97,33 +100,19 @@ type Agent struct {
 	// is calling this.
 	WorkloadSecrets security.SecretManager
 
-	// If set, this is the Citadel client, used to retrieve certificates.
+	// If set, this is the Citadel upstream, used to retrieve certificates.
 	CitadelClient security.Client
 
-	// Expected SAN for the discovery address, for tests.
-	XDSSAN string
-
 	proxyConfig *mesh.ProxyConfig
-
-	// Listener for the XDS proxy
-	LocalXDSListener net.Listener
-
-	// ProxyGen is a generator for proxied types - will 'generate' XDS by using
-	// an adsc connection.
-	proxyGen *xds.ProxyGen
-
-	// used for XDS portion.
-	localListener   net.Listener
-	localGrpcServer *grpc.Server
-
-	xdsServer *xds.SimpleServer
 
 	cfg     *AgentConfig
 	secOpts *security.Options
 
-	stopCh chan struct{}
+	// used for local XDS generator portion, to download all configs and generate xds locally.
+	localXDSGenerator *localXDSGenerator
 
-	ADSC *adsc.ADSC
+	// Used when proxying envoy xds via istio-agent is enabled.
+	xdsProxy *XdsProxy
 }
 
 // AgentConfig contains additional config for the agent, not included in ProxyConfig.
@@ -131,13 +120,29 @@ type Agent struct {
 // Eventually most non-test settings should graduate to ProxyConfig
 // Please don't add 100 parameters to the NewAgent function (or any other)!
 type AgentConfig struct {
-	// LocalXDSAddr is the address of the XDS proxy. If not set, the env variable XDS_LOCAL will be used.
-	// ( we may use ProxyConfig if this needs to be exposed, or we can base it on the base port - 15000)
+	// ProxyXDSViaAgent if true will enable a local XDS proxy that will simply
+	// ferry Envoy's XDS requests to istiod and responses back to envoy
+	// This flag is temporary until the feature is stabilized.
+	ProxyXDSViaAgent bool
+
+	// LocalXDSGeneratorListenAddress is the address where the agent will listen for XDS connections and generate all
+	// xds configurations locally. If not set, the env variable LOCAL_XDS_GENERATOR will be used.
 	// Set for tests to 127.0.0.1:0.
-	LocalXDSAddr string
+	LocalXDSGeneratorListenAddress string
 
 	// Grpc dial options. Used for testing
 	GrpcOptions []grpc.DialOption
+
+	// Namespace to connect as
+	Namespace string
+
+	// XDSRootCerts is the location of the root CA for the XDS connection. Used for setting platform certs or
+	// using custom roots.
+	XDSRootCerts string
+
+	// CARootCerts of the location of the root CA for the CA connection. Used for setting platform certs or
+	// using custom roots.
+	CARootCerts string
 }
 
 // NewAgent wraps the logic for a local SDS. It will check if the JWT token required for local SDS is
@@ -194,7 +199,7 @@ func NewAgent(proxyConfig *mesh.ProxyConfig, cfg *AgentConfig,
 	sa.secOpts.UseLocalJWT = !sa.secOpts.FileMountedCerts
 
 	// Init the XDS proxy part of the agent.
-	sa.initXDS()
+	sa.initXDSGenerator()
 
 	return sa
 }
@@ -223,7 +228,7 @@ func (sa *Agent) Start(isSidecar bool, podNamespace string) (*sds.Server, error)
 			log.Infof("Starting gateway SDS")
 			sa.secOpts.EnableGatewaySDS = true
 			// TODO: what is the setting for ingress ?
-			sa.secOpts.GatewayUDSPath = strings.TrimPrefix(model.GatewaySdsUdsPath, "unix:")
+			sa.secOpts.GatewayUDSPath = strings.TrimPrefix(model.CredentialNameSDSUdsPath, "unix:")
 			gatewaySecretCache = sa.newSecretCache(podNamespace)
 		} else {
 			log.Infof("Skipping gateway SDS")
@@ -236,17 +241,40 @@ func (sa *Agent) Start(isSidecar bool, podNamespace string) (*sds.Server, error)
 		return nil, err
 	}
 
-	// Start the XDS client and proxy.
-	err = sa.startXDS(sa.proxyConfig, sa.WorkloadSecrets)
-	if err != nil {
-		return nil, fmt.Errorf("xds proxy: %v", err)
+	// Start the local XDS generator.
+	if sa.localXDSGenerator != nil {
+		err = sa.startXDSGenerator(sa.proxyConfig, sa.WorkloadSecrets, podNamespace)
+		if err != nil {
+			return nil, fmt.Errorf("failed to start local xds generator: %v", err)
+		}
 	}
 
+	if sa.cfg.ProxyXDSViaAgent {
+		// TODO: Merge pieces with the nodeagent code
+		sa.xdsProxy, err = initXdsProxy(sa)
+		if err != nil {
+			return nil, fmt.Errorf("failed to start xds proxy: %v", err)
+		}
+	}
 	return server, nil
 }
 
+func (sa *Agent) Close() {
+	if sa.xdsProxy != nil {
+		sa.xdsProxy.close()
+	}
+	sa.closeLocalXDSGenerator()
+}
+
+func (sa *Agent) GetLocalXDSGeneratorListener() net.Listener {
+	if sa.localXDSGenerator != nil {
+		return sa.localXDSGenerator.listener
+	}
+	return nil
+}
+
 func gatewaySdsExists() bool {
-	p := strings.TrimPrefix(model.GatewaySdsUdsPath, "unix:")
+	p := strings.TrimPrefix(model.CredentialNameSDSUdsPath, "unix:")
 	dir := path.Dir(p)
 	_, err := os.Stat(dir)
 	return !os.IsNotExist(err)
@@ -268,43 +296,33 @@ func gatewaySdsExists() bool {
 //
 // TODO: additional checks for existence. Fail early, instead of obscure envoy errors.
 func (sa *Agent) FindRootCAForXDS() string {
-	if strings.HasSuffix(sa.proxyConfig.DiscoveryAddress, ":443") {
-		return "/etc/ssl/certs/ca-certificates.crt"
+	if sa.cfg.XDSRootCerts != "" {
+		return sa.cfg.XDSRootCerts
 	} else if _, err := os.Stat("./etc/certs/root-cert.pem"); err == nil {
 		// Old style - mounted cert. This is used for XDS auth only,
 		// not connecting to CA_ADDR because this mode uses external
 		// agent (Secret refresh, etc)
 		return "./etc/certs/root-cert.pem"
-	} else if sa.secOpts.PilotCertProvider == "istiod" {
-		// PILOT_CERT_PROVIDER - default is istiod
-		// This is the default - a mounted config map on K8S
-		return "./var/run/secrets/istio/root-cert.pem"
 	} else if sa.secOpts.PilotCertProvider == "kubernetes" {
 		// Using K8S - this is likely incorrect, may work by accident.
 		// API is alpha.
-		return "./var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+		return k8sCAPath
 	} else if sa.secOpts.ProvCert != "" {
 		// This was never completely correct - PROV_CERT are only intended for auth with CA_ADDR,
 		// and should not be involved in determining the root CA.
 		return sa.secOpts.ProvCert + "/root-cert.pem"
+	} else {
+		// PILOT_CERT_PROVIDER - default is istiod
+		// This is the default - a mounted config map on K8S
+		return path.Join(CitadelCACertPath, constants.CACertNamespaceConfigMapDataName)
 	}
-	// Default to std certs.
-	return "/etc/ssl/certs/ca-certificates.crt"
 }
 
 // Find the root CA to use when connecting to the CA (Istiod or external).
 //
 func (sa *Agent) FindRootCAForCA() string {
-	ca := sa.secOpts.CAEndpoint
-	if ca == "" {
-		ca = sa.proxyConfig.DiscoveryAddress
-	}
-	if strings.HasSuffix(ca, ":443") {
-		return "/etc/ssl/certs/ca-certificates.crt"
-	} else if sa.secOpts.PilotCertProvider == "istiod" {
-		// This is the default - a mounted config map on K8S
-		return path.Join(CitadelCACertPath, constants.CACertNamespaceConfigMapDataName)
-		// or: "./var/run/secrets/istio/root-cert.pem"
+	if sa.cfg.CARootCerts != "" {
+		return sa.cfg.CARootCerts
 	} else if sa.secOpts.PilotCertProvider == "kubernetes" {
 		// Using K8S - this is likely incorrect, may work by accident.
 		// API is alpha.
@@ -315,9 +333,11 @@ func (sa *Agent) FindRootCAForCA() string {
 		// This was never completely correct - PROV_CERT are only intended for auth with CA_ADDR,
 		// and should not be involved in determining the root CA.
 		return sa.secOpts.ProvCert + "/root-cert.pem"
+	} else {
+		// This is the default - a mounted config map on K8S
+		return path.Join(CitadelCACertPath, constants.CACertNamespaceConfigMapDataName)
+		// or: "./var/run/secrets/istio/root-cert.pem"
 	}
-	// Default to std certs.
-	return "/etc/ssl/certs/ca-certificates.crt"
 }
 
 // newWorkloadSecretCache creates the cache for workload secrets and/or gateway secrets.
