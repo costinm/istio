@@ -160,6 +160,8 @@ type Options struct {
 	// Set using "PROV_CERT" environment. If no private key/certificate is found, token will be used.
 	ProvCert string
 
+	// whether  ControlPlaneAuthPolicy is MUTUAL_TLS
+	TLSEnabled bool
 
 	// ClusterID is the cluster where the agent resides.
 	// Normally initialized from ISTIO_META_CLUSTER_ID - after a tortuous journey it
