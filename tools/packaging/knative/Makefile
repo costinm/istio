@@ -25,6 +25,13 @@ TAG ?= asm-cr
 # Hub for the proxy
 PROXY_HUB ?= grc.io/wlhe-cr
 
+$(ISTIO_OUT)/knative/telemetry-sd.yaml: manifests/charts/istio-control/istio-discovery/templates/telemetryv2_1.8.yaml
+	mkdir -p $(ISTIO_OUT)/knative/templates
+	cat tools/packaging/knative/values.telemetry-sd.yaml > $(ISTIO_OUT)/knative/values.yaml
+	cp manifests/charts/istio-control/istio-discovery/templates/telemetryv2_1.8.yaml ${ISTIO_OUT}/knative/templates
+	cp manifests/charts/istio-control/istio-discovery/Chart.yaml ${ISTIO_OUT}/knative/Chart.yaml
+	helm template $(ISTIO_OUT)/knative > $@
+
 # Setup the CloudRun Istiod revision
 knative/setup:
 	#gcloud config unset api_endpoint_overrides/run

@@ -108,6 +108,7 @@ docker.pilot: pilot/docker/Dockerfile.pilot
 docker.cloudrun: BUILD_PRE=&& chmod 755 pilot-discovery
 docker.cloudrun: BUILD_ARGS=--build-arg BASE_VERSION=${BASE_VERSION}
 docker.cloudrun: $(ISTIO_OUT_LINUX)/pilot-discovery
+docker.cloudrun: $(ISTIO_OUT)/knative/telemetry-sd.yaml
 docker.cloudrun: manifests/charts/base/files/gen-istio-cluster.yaml
 docker.cloudrun: manifests/charts/istio-control/istio-discovery/files/injection-template.yaml
 docker.cloudrun: tools/packaging/knative/injection-values.yaml
@@ -115,7 +116,6 @@ docker.cloudrun: tools/packaging/knative/istiod-gcp.sh
 docker.cloudrun: tools/packaging/knative/mesh_template.yaml
 docker.cloudrun: tools/packaging/knative/mutating_template.yaml
 docker.cloudrun: tools/packaging/knative/telemetry.yaml
-docker.cloudrun: tools/packaging/knative/telemetry-sd.yaml
 docker.cloudrun: tools/packaging/knative/Dockerfile.cloudrun
 	$(DOCKER_RULE)
 

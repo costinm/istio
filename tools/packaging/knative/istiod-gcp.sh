@@ -31,6 +31,8 @@ export REVISION=${REV:-managed}
 # TODO: should be auto-set now, verify safe to remove
 export GKE_CLUSTER_URL=https://container.googleapis.com/v1/projects/${PROJECT}/locations/${ZONE}/clusters/${CLUSTER}
 
+export CLUSTER_ID=${PROJECT}/${ZONE}/${CLUSTER}
+
 # Emulate K8S - with one namespace per tenant
 export ASM_CONTROL_PLANE_POD_NAMESPACE=${K_CONFIGURATION}
 # Revision is equivalent with a deployment - unfortunately we can't get instance id.
