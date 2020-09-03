@@ -168,7 +168,6 @@ type EndpointShards struct {
 func NewDiscoveryServer(env *model.Environment, plugins []string) *DiscoveryServer {
 	out := &DiscoveryServer{
 		Env:                     env,
-		ConfigGenerator:         core.NewConfigGenerator(plugins),
 		Generators:              map[string]model.XdsResourceGenerator{},
 		EndpointShardsByService: map[string]map[string]*EndpointShards{},
 		concurrentPushLimit:     make(chan struct{}, features.PushThrottle),
@@ -192,9 +191,11 @@ func NewDiscoveryServer(env *model.Environment, plugins []string) *DiscoveryServ
 
 	out.initGenerators()
 
-	if features.EnableEDSCaching {
+	if features.EnableXDSCaching {
 		out.Cache = model.NewXdsCache()
 	}
+
+	out.ConfigGenerator = core.NewConfigGenerator(plugins, out.Cache)
 
 	return out
 }
