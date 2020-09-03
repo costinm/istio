@@ -16,8 +16,6 @@ package tokenreview
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -25,37 +23,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
-
-type jwtPayload struct {
-	// Aud is the expected audience, defaults to istio-ca - but is based on istiod.yaml configuration.
-	// If set to a different value - use the value defined by istiod.yaml. Env variable can
-	// still override
-	Aud []string `json:"aud"`
-}
-
-// checkAudience detects if the token has an audience or is a 1st party JWT.
-// This allows migration and interop - we need to accept both.
-func checkAudience(jwt string) bool {
-	jwtSplit := strings.Split(jwt, ".")
-	if len(jwtSplit) != 3 {
-		return true
-	}
-	payload := jwtSplit[1]
-
-	payloadBytes, err := base64.RawStdEncoding.DecodeString(payload)
-	if err != nil {
-		return true
-	}
-
-	structuredPayload := &jwtPayload{}
-	err = json.Unmarshal(payloadBytes, &structuredPayload)
-	if err != nil {
-		return true
-	}
-
-	return len(structuredPayload.Aud) > 0
-}
-
 
 // ValidateK8sJwt validates a k8s JWT at API server.
 // Return {<namespace>, <serviceaccountname>} in the targetToken when the validation passes.
