@@ -27,10 +27,15 @@ PROXY_HUB ?= grc.io/wlhe-cr
 
 $(ISTIO_OUT)/knative/telemetry-sd.yaml: manifests/charts/istio-control/istio-discovery/templates/telemetryv2_1.8.yaml
 	mkdir -p $(ISTIO_OUT)/knative/templates
-	cat tools/packaging/knative/values.telemetry-sd.yaml > $(ISTIO_OUT)/knative/values.yaml
 	cp manifests/charts/istio-control/istio-discovery/templates/telemetryv2_1.8.yaml ${ISTIO_OUT}/knative/templates
 	cp manifests/charts/istio-control/istio-discovery/Chart.yaml ${ISTIO_OUT}/knative/Chart.yaml
-	helm template $(ISTIO_OUT)/knative > $@
+	helm template $(ISTIO_OUT)/knative -f tools/packaging/knative/values.telemetry-sd.yaml > $@
+
+$(ISTIO_OUT)/knative/telemetry.yaml: manifests/charts/istio-control/istio-discovery/templates/telemetryv2_1.8.yaml
+	mkdir -p $(ISTIO_OUT)/knative/templates
+	cp manifests/charts/istio-control/istio-discovery/templates/telemetryv2_1.8.yaml ${ISTIO_OUT}/knative/templates
+	cp manifests/charts/istio-control/istio-discovery/Chart.yaml ${ISTIO_OUT}/knative/Chart.yaml
+	helm template $(ISTIO_OUT)/knative -f tools/packaging/knative/values.telemetry.yaml > $@
 
 # Setup the CloudRun Istiod revision
 knative/setup:
