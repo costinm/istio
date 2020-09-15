@@ -27,6 +27,7 @@ import (
 	"istio.io/istio/security/pkg/nodeagent/plugin/providers/google/stsclient"
 
 	mesh "istio.io/api/mesh/v1alpha1"
+	"istio.io/istio/pilot/pkg/dns"
 	"istio.io/istio/pilot/pkg/security/model"
 	"istio.io/istio/pkg/config/constants"
 	"istio.io/istio/pkg/kube"
@@ -73,6 +74,12 @@ var (
 	LocalSDS = "./etc/istio/proxy/SDS"
 )
 
+const (
+	MetadataClientCertKey   = "ISTIO_META_TLS_CLIENT_KEY"
+	MetadataClientCertChain = "ISTIO_META_TLS_CLIENT_CERT_CHAIN"
+	MetadataClientRootCert  = "ISTIO_META_TLS_CLIENT_ROOT_CERT"
+)
+
 // Agent contains the configuration of the agent, based on the injected
 // environment:
 // - SDS hostPath if node-agent was used
@@ -102,6 +109,9 @@ type Agent struct {
 
 	// Used when proxying envoy xds via istio-agent is enabled.
 	xdsProxy *XdsProxy
+
+	// local DNS Server that processes DNS requests locally and forwards to upstream DNS if needed.
+	localDNSServer *dns.LocalDNSServer
 }
 
 // AgentConfig contains additional config for the agent, not included in ProxyConfig.
@@ -247,8 +257,11 @@ func (sa *Agent) Start(isSidecar bool, podNamespace string) (*sds.Server, error)
 		}
 	}
 
+	if err = sa.initLocalDNSServer(isSidecar); err != nil {
+		return nil, fmt.Errorf("failed to start local DNS server: %v", err)
+	}
 	if sa.cfg.ProxyXDSViaAgent {
-		sa.xdsProxy, err = initXdsProxy(sa, isSidecar)
+		sa.xdsProxy, err = initXdsProxy(sa)
 		if err != nil {
 			return nil, fmt.Errorf("failed to start xds proxy: %v", err)
 		}
@@ -256,9 +269,23 @@ func (sa *Agent) Start(isSidecar bool, podNamespace string) (*sds.Server, error)
 	return server, nil
 }
 
+func (sa *Agent) initLocalDNSServer(isSidecar bool) (err error) {
+	// we dont need dns server on gateways
+	if sa.cfg.DNSCapture && sa.cfg.ProxyXDSViaAgent && isSidecar {
+		if sa.localDNSServer, err = dns.NewLocalDNSServer(sa.cfg.ProxyNamespace, sa.cfg.ProxyDomain); err != nil {
+			return err
+		}
+		sa.localDNSServer.StartDNS()
+	}
+	return nil
+}
+
 func (sa *Agent) Close() {
 	if sa.xdsProxy != nil {
 		sa.xdsProxy.close()
+	}
+	if sa.localDNSServer != nil {
+		sa.localDNSServer.Close()
 	}
 	sa.closeLocalXDSGenerator()
 }
@@ -308,6 +335,9 @@ func (sa *Agent) FindRootCAForXDS() string {
 		// This was never completely correct - PROV_CERT are only intended for auth with CA_ADDR,
 		// and should not be involved in determining the root CA.
 		return sa.secOpts.ProvCert + "/root-cert.pem"
+	} else if sa.secOpts.FileMountedCerts {
+		// FileMountedCerts - Load it from Proxy Metadata.
+		return sa.proxyConfig.ProxyMetadata[MetadataClientRootCert]
 	} else {
 		// PILOT_CERT_PROVIDER - default is istiod
 		// This is the default - a mounted config map on K8S

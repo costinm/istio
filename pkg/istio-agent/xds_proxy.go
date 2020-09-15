@@ -20,10 +20,12 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"math"
 	"net"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -33,6 +35,7 @@ import (
 	"golang.org/x/oauth2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/oauth"
 	"google.golang.org/grpc/keepalive"
@@ -42,60 +45,78 @@ import (
 	"istio.io/istio/pilot/pkg/dns"
 	nds "istio.io/istio/pilot/pkg/proto"
 	v3 "istio.io/istio/pilot/pkg/xds/v3"
+	"istio.io/istio/pkg/config/constants"
+	"istio.io/istio/pkg/mcp/status"
+	"istio.io/pkg/filewatcher"
 	"istio.io/pkg/log"
+)
+
+var (
+	newFileWatcher = filewatcher.NewWatcher
 )
 
 const (
 	defaultClientMaxReceiveMessageSize = math.MaxInt32
-	defaultInitialConnWindowSize       = 1024 * 1024 // default gRPC InitialWindowSize
-	defaultInitialWindowSize           = 1024 * 1024 // default gRPC ConnWindowSize
+	defaultInitialConnWindowSize       = 1024 * 1024            // default gRPC InitialWindowSize
+	defaultInitialWindowSize           = 1024 * 1024            // default gRPC ConnWindowSize
+	sendTimeout                        = 5 * time.Second        // default upstream send timeout.
+	watchDebounceDelay                 = 100 * time.Millisecond // file watcher event debounce delay.
 )
 
+const (
+	xdsUdsPath = "./etc/istio/proxy/XDS"
+)
+
+// XDS Proxy proxies all XDS requests from envoy to istiod, in addition to allowing
+// subsystems inside the agent to also communicate with either istiod/envoy (eg dns, sds, etc).
+// The goal here is to consolidate all xds related connections to istiod/envoy into a
+// single tcp connection with multiple gRPC streams.
+// TODO: Right now, the workloadSDS server and gatewaySDS servers are still separate
+// connections. These need to be consolidated.
 type XdsProxy struct {
 	stopChan             chan struct{}
+	resetChan            chan struct{}
 	clusterID            string
 	downstreamListener   net.Listener
 	downstreamGrpcServer *grpc.Server
 	istiodAddress        string
 	istiodDialOptions    []grpc.DialOption
 	localDNSServer       *dns.LocalDNSServer
+	fileWatcher          filewatcher.FileWatcher
 }
 
 var proxyLog = log.RegisterScope("xdsproxy", "XDS Proxy in Istio Agent", 0)
 
-// XDS Proxy proxies all XDS requests from envoy to istiod, in addition to allowing subsystems inside
-// the agent to also communicate with either istiod/envoy (eg dns, sds, etc).
-// The goal here is to consolidate all xds related connections to istiod/envoy into a
-// single tcp connection with multiple gRPC streams.
-// TODO: Right now, the workloadSDS server and gatewaySDS servers are still separate
-// connections. These need to be consolidated
-func initXdsProxy(sa *Agent, isSidecar bool) (*XdsProxy, error) {
+func initXdsProxy(ia *Agent) (*XdsProxy, error) {
 	var err error
 	proxy := &XdsProxy{
-		istiodAddress: sa.proxyConfig.DiscoveryAddress,
-		clusterID:     sa.secOpts.ClusterID,
+		istiodAddress:  ia.proxyConfig.DiscoveryAddress,
+		clusterID:      ia.secOpts.ClusterID,
+		localDNSServer: ia.localDNSServer,
+		fileWatcher:    newFileWatcher(),
+		stopChan:       make(chan struct{}),
+		resetChan:      make(chan struct{}),
 	}
+
+	proxyLog.Infof("Initializing with upstream address %s and cluster %s", proxy.istiodAddress, proxy.clusterID)
 
 	if err = proxy.initDownstreamServer(); err != nil {
 		return nil, err
 	}
 
-	if proxy.istiodDialOptions, err = buildUpstreamClientDialOpts(sa); err != nil {
+	if proxy.istiodDialOptions, err = proxy.buildUpstreamClientDialOpts(ia); err != nil {
 		return nil, err
 	}
 
-	// we dont need dns server on gateways
-	if sa.cfg.DNSCapture && isSidecar {
-		if proxy.localDNSServer, err = dns.NewLocalDNSServer(sa.cfg.ProxyNamespace, sa.cfg.ProxyDomain); err != nil {
-			return nil, err
-		}
-		proxy.localDNSServer.StartDNS()
-	}
-
 	go func() {
-		_ = proxy.downstreamGrpcServer.Serve(proxy.downstreamListener)
+		if err := proxy.downstreamGrpcServer.Serve(proxy.downstreamListener); err != nil {
+			log.Errorf("failed to accept downstream gRPC connection %v", err)
+		}
 	}()
 
+	if err = proxy.initCertificateWatches(ia, proxy.stopChan); err != nil {
+		return nil, err
+	}
 	return proxy, nil
 }
 
@@ -103,13 +124,15 @@ func initXdsProxy(sa *Agent, isSidecar bool) (*XdsProxy, error) {
 // This ensures that a new connection between istiod and agent doesn't end up consuming pending messages from envoy
 // as the new connection may not go to the same istiod. Vice versa case also applies.
 func (p *XdsProxy) StreamAggregatedResources(downstream discovery.AggregatedDiscoveryService_StreamAggregatedResourcesServer) error {
-	errChan := make(chan error)
+	proxyLog.Infof("connecting to %s", p.istiodAddress)
+
+	upstreamError := make(chan error)
+	downstreamError := make(chan error)
 	requestsChan := make(chan *discovery.DiscoveryRequest, 10)
 	responsesChan := make(chan *discovery.DiscoveryResponse, 10)
 	// A separate channel for nds requests to not contend with the ones from envoys
 	ndsRequestChan := make(chan *discovery.DiscoveryRequest, 5)
 
-	proxyLog.Infof("connecting to upstream %s", p.istiodAddress)
 	upstreamConn, err := grpc.Dial(p.istiodAddress, p.istiodDialOptions...)
 	if err != nil {
 		proxyLog.Errorf("failed to connect to upstream %s: %v", p.istiodAddress, err)
@@ -128,24 +151,27 @@ func (p *XdsProxy) StreamAggregatedResources(downstream discovery.AggregatedDisc
 	firstNDSSent := false
 
 	go func() {
+		defer close(responsesChan) // Indicates upstream close.
 		for {
 			// from istiod
 			resp, err := upstream.Recv()
 			if err != nil {
-				proxyLog.Errorf("upstream recv error: %v", err)
-				errChan <- err
+				upstreamError <- err
+				close(upstreamError)
 				return
 			}
 			responsesChan <- resp
 		}
 	}()
 	go func() {
+		defer close(requestsChan) // Indicates downstream close.
+		defer close(ndsRequestChan)
 		for {
 			// From Envoy
 			req, err := downstream.Recv()
 			if err != nil {
-				proxyLog.Errorf("downstream recv error: %v", err)
-				errChan <- err
+				downstreamError <- err
+				close(downstreamError)
 				return
 			}
 			// forward to istiod
@@ -162,33 +188,58 @@ func (p *XdsProxy) StreamAggregatedResources(downstream discovery.AggregatedDisc
 
 	for {
 		select {
-		case err := <-errChan:
-			// error receiving from downstream envoy
-			// recycle connection.
+		case err := <-upstreamError:
+			// error from upstream Istiod.
+			if isExpectedGRPCError(err) {
+				proxyLog.Debugf("upstream terminated with status %v", err)
+			} else {
+				proxyLog.Warnf("upstream terminated with unexpected error %v", err)
+			}
 			_ = upstream.CloseSend()
-			// todo close downstream?
 			return err
-		case req := <-requestsChan:
-			if err = upstream.Send(req); err != nil {
-				proxyLog.Errorf("upstream send error: %v", err)
+		case err := <-downstreamError:
+			// error from downstream Envoy.
+			if isExpectedGRPCError(err) {
+				proxyLog.Debugf("downstream terminated with status %v", err)
+			} else {
+				proxyLog.Warnf("downstream terminated with unexpected error %v", err)
+			}
+			// TODO: Close downstream?
+			return err
+		case req, ok := <-requestsChan:
+			if !ok {
+				return nil
+			}
+			proxyLog.Debug("request for type url %s", req.TypeUrl)
+			if err = sendUpstreamWithTimeout(ctx, upstream, req); err != nil {
+				proxyLog.Errorf("upstream send error for type url %s: %v", req.TypeUrl, err)
 				return err
 			}
-		case req := <-ndsRequestChan:
-			if err = upstream.Send(req); err != nil {
-				proxyLog.Errorf("upstream send error for nds: %v", err)
+		case req, ok := <-ndsRequestChan:
+			if !ok {
+				return nil
+			}
+			proxyLog.Debug("request for type url %s", req.TypeUrl)
+			if err = sendUpstreamWithTimeout(ctx, upstream, req); err != nil {
+				proxyLog.Errorf("upstream send error for type url %s: %v", req.TypeUrl, err)
 				return err
 			}
-		case resp := <-responsesChan:
-			if resp.TypeUrl == v3.NameTableType {
+		case resp, ok := <-responsesChan:
+			if !ok {
+				return nil
+			}
+			proxyLog.Debug("response for type url %s", resp.TypeUrl)
+			switch resp.TypeUrl {
+			case v3.NameTableType:
 				// intercept. This is for the dns server
 				if p.localDNSServer != nil && len(resp.Resources) > 0 {
 					var nt nds.NameTable
 					if err = ptypes.UnmarshalAny(resp.Resources[0], &nt); err != nil {
-						proxyLog.Errorf("failed to unmarshall name table: %v", err)
-						return err
+						log.Errorf("failed to unmarshall name table: %v", err)
 					}
 					p.localDNSServer.UpdateLookupTable(&nt)
 				}
+
 				// queue the next nds request. This wont block most likely as we are the only
 				// users of this channel, compared to the requestChan that could be populated with
 				// request from envoy
@@ -197,13 +248,19 @@ func (p *XdsProxy) StreamAggregatedResources(downstream discovery.AggregatedDisc
 					TypeUrl:       v3.NameTableType,
 					ResponseNonce: resp.Nonce,
 				}
-			} else if err := downstream.Send(resp); err != nil {
-				proxyLog.Errorf("downstream send error: %v", err)
-				// we cannot return partial error and hope to restart just the downstream
-				// as we are blindly proxying req/responses. For now, the best course of action
-				// is to terminate upstream connection as well and restart afresh.
-				return err
+			default:
+				// TODO: Validate the known type urls before forwarding them to Envoy.
+				if err := downstream.Send(resp); err != nil {
+					proxyLog.Errorf("downstream send error: %v", err)
+					// we cannot return partial error and hope to restart just the downstream
+					// as we are blindly proxying req/responses. For now, the best course of action
+					// is to terminate upstream connection as well and restart afresh.
+					return err
+				}
 			}
+		case <-p.resetChan:
+			_ = upstream.CloseSend()
+			return nil
 		case <-p.stopChan:
 			_ = upstream.CloseSend()
 			return nil
@@ -223,9 +280,26 @@ func (p *XdsProxy) close() {
 	if p.downstreamListener != nil {
 		_ = p.downstreamListener.Close()
 	}
-	if p.localDNSServer != nil {
-		p.localDNSServer.Close()
+	if p.fileWatcher != nil {
+		p.fileWatcher.Close()
 	}
+}
+
+// isExpectedGRPCError checks a gRPC error code and determines whether it is an expected error when
+// things are operating normally. This is basically capturing when the client disconnects.
+func isExpectedGRPCError(err error) bool {
+	if err == io.EOF {
+		return true
+	}
+
+	s := status.Convert(err)
+	if s.Code() == codes.Canceled || s.Code() == codes.DeadlineExceeded {
+		return true
+	}
+	if s.Code() == codes.Unavailable && (s.Message() == "client disconnected" || s.Message() == "transport is closing") {
+		return true
+	}
+	return false
 }
 
 // TODO reuse code from SDS
@@ -290,7 +364,7 @@ func (ts *fileTokenSource) Token() (*oauth2.Token, error) {
 }
 
 func (p *XdsProxy) initDownstreamServer() error {
-	l, err := setUpUds("./etc/istio/proxy/XDS")
+	l, err := setUpUds(xdsUdsPath)
 	if err != nil {
 		return err
 	}
@@ -302,8 +376,21 @@ func (p *XdsProxy) initDownstreamServer() error {
 	return nil
 }
 
-func buildUpstreamClientDialOpts(sa *Agent) ([]grpc.DialOption, error) {
-	tlsOpts, err := getTLSDialOption(sa)
+// getCertKeyPaths returns the paths for key and cert.
+func (p *XdsProxy) getCertKeyPaths(agent *Agent) (string, string) {
+	var key, cert string
+	if agent.secOpts.ProvCert != "" {
+		key = path.Join(agent.secOpts.ProvCert, constants.KeyFilename)
+		cert = path.Join(path.Join(agent.secOpts.ProvCert, constants.CertChainFilename))
+	} else if agent.secOpts.FileMountedCerts {
+		key = agent.proxyConfig.ProxyMetadata[MetadataClientCertKey]
+		cert = agent.proxyConfig.ProxyMetadata[MetadataClientCertChain]
+	}
+	return key, cert
+}
+
+func (p *XdsProxy) buildUpstreamClientDialOpts(sa *Agent) ([]grpc.DialOption, error) {
+	tlsOpts, err := p.getTLSDialOption(sa)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build TLS dial option to talk to upstream: %v", err)
 	}
@@ -322,7 +409,7 @@ func buildUpstreamClientDialOpts(sa *Agent) ([]grpc.DialOption, error) {
 		tlsOpts,
 		grpc.WithConnectParams(grpc.ConnectParams{
 			Backoff:           backoff.DefaultConfig,
-			MinConnectTimeout: 5 * time.Second,
+			MinConnectTimeout: 1 * time.Second,
 		}),
 		keepaliveOption, initialWindowSizeOption, initialConnWindowSizeOption, msgSizeOption,
 		grpc.WithBlock(),
@@ -333,9 +420,8 @@ func buildUpstreamClientDialOpts(sa *Agent) ([]grpc.DialOption, error) {
 	// In these cases, while we fallback to mTLS to istiod using the provisioned certs
 	// it would be ideal to keep using token plus k8s ca certs for control plane communication
 	// as the intention behind provisioned certs on k8s pods is only for data plane comm.
-	if sa.secOpts.ProvCert == "" {
-		// only if running in k8s pod
-		dialOptions = append(dialOptions, grpc.WithPerRPCCredentials(oauth.TokenSource{&fileTokenSource{
+	if sa.secOpts.ProvCert == "" || !sa.secOpts.FileMountedCerts {
+		dialOptions = append(dialOptions, grpc.WithPerRPCCredentials(oauth.TokenSource{TokenSource: &fileTokenSource{
 			sa.secOpts.JWTPath,
 			time.Second * 300,
 		}}))
@@ -343,16 +429,92 @@ func buildUpstreamClientDialOpts(sa *Agent) ([]grpc.DialOption, error) {
 	return dialOptions, nil
 }
 
+// initCertificateWatches sets up  watches for the certs and resets upstream if they change.
+func (p *XdsProxy) initCertificateWatches(agent *Agent, stop <-chan struct{}) error {
+	keyFile, certFile := p.getCertKeyPaths(agent)
+	rootCert := agent.FindRootCAForXDS()
+
+	var watching bool
+
+	for _, file := range []string{rootCert, certFile, keyFile} {
+		if len(file) > 0 {
+			proxyLog.Infof("adding watcher for certificate %s", file)
+			if err := p.fileWatcher.Add(file); err != nil {
+				return fmt.Errorf("could not watch %v: %v", file, err)
+			}
+			watching = true
+		}
+	}
+	if !watching {
+		return nil
+	}
+	go func() {
+		var keyCertTimerC <-chan time.Time
+		for {
+			select {
+			case <-keyCertTimerC:
+				keyCertTimerC = nil
+				proxyLog.Info("xds connection certificates have changed, resetting the upstream connection")
+				// Close upstream connection.
+				p.resetChan <- struct{}{}
+			case <-p.fileWatcher.Events(certFile):
+				if keyCertTimerC == nil {
+					keyCertTimerC = time.After(watchDebounceDelay)
+				}
+			case <-p.fileWatcher.Events(keyFile):
+				if keyCertTimerC == nil {
+					keyCertTimerC = time.After(watchDebounceDelay)
+				}
+			case <-stop:
+				return
+			}
+		}
+	}()
+
+	return nil
+}
+
 // Returns the TLS option to use when talking to Istiod
 // If provisioned cert is set, it will return a mTLS related config
 // Else it will return a one-way TLS related config with the assumption
 // that the consumer code will use tokens to authenticate the upstream.
-func getTLSDialOption(agent *Agent) (grpc.DialOption, error) {
+func (p *XdsProxy) getTLSDialOption(agent *Agent) (grpc.DialOption, error) {
+
+	rootCert, err := p.getRootCertificate(agent)
+	if err != nil {
+		return nil, err
+	}
+
+	config := tls.Config{
+		GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+			var certificate tls.Certificate
+			key, cert := p.getCertKeyPaths(agent)
+			if key != "" && cert != "" {
+				// Load the certificate from disk
+				certificate, err = tls.LoadX509KeyPair(cert, key)
+				if err != nil {
+					return nil, err
+				}
+			}
+			return &certificate, nil
+		},
+		RootCAs: rootCert,
+	}
+
+	// strip the port from the address
+	parts := strings.Split(agent.proxyConfig.DiscoveryAddress, ":")
+	config.ServerName = parts[0]
+	config.MinVersion = tls.VersionTLS12
+	transportCreds := credentials.NewTLS(&config)
+	return grpc.WithTransportCredentials(transportCreds), nil
+}
+
+func (p *XdsProxy) getRootCertificate(agent *Agent) (*x509.CertPool, error) {
 	var certPool *x509.CertPool
 	var err error
 	var rootCert []byte
-	xdsCACert := agent.FindRootCAForXDS()
-	rootCert, err = ioutil.ReadFile(xdsCACert)
+	xdsCACertPath := agent.FindRootCAForXDS()
+	rootCert, err = ioutil.ReadFile(xdsCACertPath)
 	if err != nil {
 		return nil, err
 	}
@@ -362,25 +524,23 @@ func getTLSDialOption(agent *Agent) (grpc.DialOption, error) {
 	if !ok {
 		return nil, fmt.Errorf("failed to create TLS dial option with root certificates")
 	}
+	return certPool, nil
+}
 
-	var certificate tls.Certificate
-	config := tls.Config{
-		Certificates: []tls.Certificate{certificate},
-		GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
-			if agent.secOpts.ProvCert != "" {
-				// Load the certificate from disk
-				if certificate, err = tls.LoadX509KeyPair(agent.secOpts.ProvCert+"/cert-chain.pem", agent.secOpts.ProvCert+"/key.pem"); err != nil {
-					return nil, err
-				}
-			}
-			return &certificate, nil
-		},
+// sendUpstreamWithTimeout sends discovery request with default send timeout.
+func sendUpstreamWithTimeout(ctx context.Context, upstream discovery.AggregatedDiscoveryService_StreamAggregatedResourcesClient,
+	request *discovery.DiscoveryRequest) error {
+	timeoutCtx, cancel := context.WithTimeout(ctx, sendTimeout)
+	defer cancel()
+	errChan := make(chan error, 1)
+	go func() {
+		errChan <- upstream.Send(request)
+		close(errChan)
+	}()
+	select {
+	case <-timeoutCtx.Done():
+		return timeoutCtx.Err()
+	case err := <-errChan:
+		return err
 	}
-	config.RootCAs = certPool
-	// strip the port from the address
-	parts := strings.Split(agent.proxyConfig.DiscoveryAddress, ":")
-	config.ServerName = parts[0]
-	config.MinVersion = tls.VersionTLS12
-	transportCreds := credentials.NewTLS(&config)
-	return grpc.WithTransportCredentials(transportCreds), nil
 }

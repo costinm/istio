@@ -103,9 +103,10 @@ func TestDNS(t *testing.T) {
 			expected: a("www.google.com.", []net.IP{net.ParseIP("1.1.1.1").To4()}),
 		},
 		{
-			name:     "success: non k8s host with search namespace yields cname",
-			host:     "www.google.com.ns1.svc.cluster.local.",
-			expected: cname("www.google.com.ns1.svc.cluster.local.", "www.google.com."),
+			name: "success: non k8s host with search namespace yields cname+A record",
+			host: "www.google.com.ns1.svc.cluster.local.",
+			expected: append(cname("www.google.com.ns1.svc.cluster.local.", "www.google.com."),
+				a("www.google.com.", []net.IP{net.ParseIP("1.1.1.1").To4()})...),
 		},
 		{
 			name:                     "success: non k8s host not in local cache",
@@ -128,9 +129,16 @@ func TestDNS(t *testing.T) {
 			expected: a("productpage.", []net.IP{net.ParseIP("9.9.9.9").To4()}),
 		},
 		{
-			name:     "success: k8s host (name.namespace) with search namespace yields cname",
-			host:     "productpage.ns1.ns1.svc.cluster.local.",
-			expected: cname("productpage.ns1.ns1.svc.cluster.local.", "productpage.ns1."),
+			name: "success: k8s host (name.namespace) with search namespace yields cname+A record",
+			host: "productpage.ns1.ns1.svc.cluster.local.",
+			expected: append(cname("productpage.ns1.ns1.svc.cluster.local.", "productpage.ns1."),
+				a("productpage.ns1.", []net.IP{net.ParseIP("9.9.9.9").To4()})...),
+		},
+		{
+			name:                    "failure: AAAA query for IPv4 k8s host (name.namespace) with search namespace",
+			host:                    "productpage.ns1.ns1.svc.cluster.local.",
+			queryAAAA:               true,
+			expectResolutionFailure: true,
 		},
 		{
 			name:     "success: k8s host - non local namespace - name.namespace",
@@ -187,38 +195,47 @@ func TestDNS(t *testing.T) {
 		},
 	}
 
-	c := dns.Client{
-		Timeout: 3 * time.Second,
+	clients := []dns.Client{
+		{
+			Timeout: 3 * time.Second,
+			Net:     "udp",
+		},
+		{
+			Timeout: 3 * time.Second,
+			Net:     "tcp",
+		},
 	}
 
-	for _, tt := range testCases {
-		t.Run(tt.name, func(t *testing.T) {
-			m := new(dns.Msg)
-			q := dns.TypeA
-			if tt.queryAAAA {
-				q = dns.TypeAAAA
-			}
-			m.SetQuestion(tt.host, q)
-			res, _, err := c.Exchange(m, testAgentDNSAddr)
+	for i := range clients {
+		for _, tt := range testCases {
+			t.Run(clients[i].Net+"-"+tt.name, func(t *testing.T) {
+				m := new(dns.Msg)
+				q := dns.TypeA
+				if tt.queryAAAA {
+					q = dns.TypeAAAA
+				}
+				m.SetQuestion(tt.host, q)
+				res, _, err := clients[i].Exchange(m, testAgentDNSAddr)
 
-			if err != nil {
-				t.Errorf("Failed to resolve query for %s: %v", tt.host, err)
-			} else {
-				if tt.expectExternalResolution {
-					// just make sure that the response has a valid DNS response from upstream resolvers
-					if res.Rcode != dns.RcodeSuccess {
-						t.Errorf("upstream dns resolution for %s failed", tt.host)
-					}
+				if err != nil {
+					t.Errorf("Failed to resolve query for %s: %v", tt.host, err)
 				} else {
-					if tt.expectResolutionFailure && res.Rcode != dns.RcodeNameError {
-						t.Errorf("expected resolution failure but it succeeded for %s", tt.host)
-					}
-					if !equalsDNSrecords(res.Answer, tt.expected) {
-						t.Errorf("dns responses for %s do not match. \n got %v\nwant %v", tt.host, res.Answer, tt.expected)
+					if tt.expectExternalResolution {
+						// just make sure that the response has a valid DNS response from upstream resolvers
+						if res.Rcode != dns.RcodeSuccess {
+							t.Errorf("upstream dns resolution for %s failed", tt.host)
+						}
+					} else {
+						if tt.expectResolutionFailure && res.Rcode != dns.RcodeNameError {
+							t.Errorf("expected resolution failure but it succeeded for %s", tt.host)
+						}
+						if !equalsDNSrecords(res.Answer, tt.expected) {
+							t.Errorf("dns responses for %s do not match. \n got %v\nwant %v", tt.host, res.Answer, tt.expected)
+						}
 					}
 				}
-			}
-		})
+			})
+		}
 	}
 	testAgentDNS.Close()
 }
@@ -289,6 +306,7 @@ func bench(t *testing.B, nameserver string, hostname string) {
 			for _, a := range res.Answer {
 				if arec, ok := a.(*dns.A); !ok {
 					// check if this is a cname redirect. If so, repeat the resolution
+					// assuming the client does not see/respect the inlined A record in the response.
 					if crec, ok := a.(*dns.CNAME); !ok {
 						errs++
 					} else {
