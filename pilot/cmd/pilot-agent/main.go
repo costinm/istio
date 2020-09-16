@@ -119,8 +119,6 @@ var (
 	// TODO: default to same as discovery address
 	caEndpointEnv = env.RegisterStringVar("CA_ADDR", "", "Address of the spiffee certificate provider. Defaults to discoveryAddress").Get()
 
-	stsEndpointEnv = env.RegisterStringVar("STS_ADDR", "", "Address of the STS exchanger.").Get()
-
 	// TODO: this is a horribly named env, it's really TOKEN_EXCHANGE_PLUGINS - but to avoid breaking
 	// it's left unchanged. It may not be needed because we autodetect.
 	pluginNamesEnv = env.RegisterStringVar("PLUGINS", "", "Token exchange plugins").Get()
@@ -352,15 +350,6 @@ var (
 			if proxyConfig.StatusPort > 0 {
 				if err := initStatusServer(ctx, proxyIPv6, proxyConfig); err != nil {
 					return err
-				}
-			}
-
-			if strings.HasSuffix(caEndpointEnv, ":443") ||
-				strings.HasSuffix(proxyConfig.DiscoveryAddress, ":443") {
-				// If connecting to a real gateway, enable JWT tokens as well.
-				if stsEndpointEnv == "" {
-					// If STS is an external address - no need for local server
-					stsPort = 15009
 				}
 			}
 

@@ -21,7 +21,6 @@ import (
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
@@ -72,9 +71,6 @@ func getConnectionAddress(ctx context.Context) string {
 func (s *Server) CreateCertificate(ctx context.Context, request *pb.IstioCertificateRequest) (
 	*pb.IstioCertificateResponse, error) {
 	s.monitoring.CSR.Increment()
-	md, _ := metadata.FromIncomingContext(ctx)
-	log.Warna("XXX METADATA: ", md)
-
 	caller := s.authenticate(ctx)
 	if caller == nil {
 		s.monitoring.AuthnError.Increment()

@@ -109,12 +109,12 @@ func (p Plugin) ExchangeToken(ctx context.Context, credFetcher security.CredFetc
 		// Normally the request should json - extremely hard to debug otherwise, not enough info in status/err
 		stsClientLog.Debugf("Unexpected unmarshal error, response was %s", string(body))
 		return "", time.Now(), resp.StatusCode, fmt.Errorf(
-			"failed to unmarshal response data. HTTP status: %s. Req: %s. Error: %v. Body size: %d", resp.Status, string(jsonStr), err, len(body))
+			"failed to unmarshal response data. HTTP status: %s. Error: %v. Body size: %d", resp.Status, err, len(body))
 	}
 
 	if respData.AccessToken == "" {
 		return "", time.Now(), resp.StatusCode, fmt.Errorf(
-			"exchanged empty token. HTTP status: %s. Req: %s Response: %v", resp.Status, string(jsonStr), string(body))
+			"exchanged empty token. HTTP status: %s. Response: %v", resp.Status, string(body))
 	}
 
 	return respData.AccessToken, time.Now().Add(time.Second * time.Duration(respData.ExpiresIn)), resp.StatusCode, nil
