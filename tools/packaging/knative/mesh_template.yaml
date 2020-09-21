@@ -7,8 +7,9 @@ trustDomainAliases:
   - cluster.local
 defaultConfig:
   proxyMetadata:
-    # Use tokens instead of MTLS
-    CALL_CREDENTIALS: "true"
+    # Use tokens instead of MTLS - this uses STS ( backup plan if proxy doesn't work)
+    #CALL_CREDENTIALS: "true"
+    ISTIO_META_PROXY_XDS_VIA_AGENT: "1"
     XDS_ROOT_CA: /etc/ssl/certs/ca-certificates.crt
     CA_ROOT_CA: /etc/ssl/certs/ca-certificates.crt
   meshId: proj-${PROJECT_NUMBER}
