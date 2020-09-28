@@ -24,6 +24,7 @@ import (
 
 	core "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	discovery "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
+	uatomic "go.uber.org/atomic"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/peer"
@@ -188,8 +189,18 @@ func (s *DiscoveryServer) processRequest(req *discovery.DiscoveryRequest, con *C
 	return s.pushXds(con, push, versionInfo(), con.Watched(req.TypeUrl), &model.PushRequest{Full: true})
 }
 
+var firstRequest = uatomic.NewBool(true)
+
 // StreamAggregatedResources implements the ADS interface.
 func (s *DiscoveryServer) StreamAggregatedResources(stream discovery.AggregatedDiscoveryService_StreamAggregatedResourcesServer) error {
+	if firstRequest.Load() {
+		// How scaling works is the first request is the "loading" request. During
+		// loading request, concurrency=1. Once that request is done, we bump up to
+		// concurrency=80. But for us, the load request is 15min (based on timeout). As a
+		// result, we should exit the first request immediately.
+		firstRequest.Store(false)
+		return errors.New("server warmup not complete; try again")
+	}
 	// Check if server is ready to accept clients and process new requests.
 	// Currently ready means caches have been synced and hence can build
 	// clusters correctly. Without this check, InitContext() call below would
