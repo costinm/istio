@@ -239,7 +239,10 @@ func parseConfigTopology() (clusterTopology, error) {
 
 func parseNetworkTopology(kubeConfigs []string) (map[resource.ClusterIndex]string, error) {
 	out := make(map[resource.ClusterIndex]string)
-	if networkTopology == "" {
+	if controlPlaneTopology == "" {
+		for index := range kubeConfigs {
+			out[resource.ClusterIndex(index)] = "network-0"
+		}
 		return out, nil
 	}
 	numClusters := len(kubeConfigs)
@@ -279,8 +282,8 @@ func normalizeFile(path *string) error {
 
 // init registers the command-line flags that we can exposed for "go test".
 func init() {
-	flag.StringVar(&kubeConfigs, "istio.test.kube.config", strings.Join(settingsFromCommandLine.KubeConfig, ":"),
-		"A comma-separated list of paths to kube config files for cluster environments (default is current kube context)")
+	flag.StringVar(&kubeConfigs, "istio.test.kube.config", "",
+		"A comma-separated list of paths to kube config files for cluster environments.")
 	flag.BoolVar(&settingsFromCommandLine.Minikube, "istio.test.kube.minikube", settingsFromCommandLine.Minikube,
 		"Deprecated. See istio.test.kube.loadbalancer. Setting this flag will fail tests.")
 	flag.BoolVar(&settingsFromCommandLine.LoadBalancerSupported, "istio.test.kube.loadbalancer", settingsFromCommandLine.LoadBalancerSupported,

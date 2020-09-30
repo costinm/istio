@@ -1,3 +1,4 @@
+// +build integ
 // Copyright Istio Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -244,4 +245,8 @@ spec:
 		return err
 	}
 	return nil
+}
+
+func (d EchoDeployments) IsMulticluster() bool {
+	return d.All.Clusters().IsMulticluster()
 }

@@ -94,6 +94,11 @@ var (
 	// Aggregated errors for all fetch operations.
 	gErrors util.Errors
 	lock    = sync.RWMutex{}
+
+	isSystemNamespace = map[string]bool{
+		"kube-system": true,
+		"kube-public": true,
+	}
 )
 
 func runBugReportCommand(_ *cobra.Command, logOpts *log.Options) error {
@@ -105,7 +110,13 @@ func runBugReportCommand(_ *cobra.Command, logOpts *log.Options) error {
 		return err
 	}
 
-	logAndPrintf("Running with the following config: \n\n%s\n\n", config)
+	clusterCtxStr, err := content.GetClusterContext()
+	if err != nil {
+		return err
+	}
+
+	common.LogAndPrintf("\nTarget cluster context: %s\n", clusterCtxStr)
+	common.LogAndPrintf("Running with the following config: \n\n%s\n\n", config)
 
 	clientConfig, clientset, err := kubeclient.New(config.KubeConfigPath, config.Context)
 	if err != nil {
@@ -126,7 +137,7 @@ func runBugReportCommand(_ *cobra.Command, logOpts *log.Options) error {
 		return err
 	}
 
-	logAndPrintf("Fetching proxy logs for the following containers:\n\n%s\n", strings.Join(paths, "\n"))
+	common.LogAndPrintf("Fetching proxy logs for the following containers:\n\n%s\n", strings.Join(paths, "\n"))
 
 	gatherInfo(client, config, resources, paths)
 	if len(gErrors) != 0 {
@@ -149,17 +160,17 @@ func runBugReportCommand(_ *cobra.Command, logOpts *log.Options) error {
 		outDir = "."
 	}
 	outPath := filepath.Join(outDir, "bug-report.tgz")
-	logAndPrintf("Creating archive at %s.\n", outPath)
+	common.LogAndPrintf("Creating archive at %s.\n", outPath)
 
-	tempRoot := archive.OutputRootDir(tempDir)
-	if err := archive.Create(tempRoot, outPath); err != nil {
+	archiveDir := archive.DirToArchive(tempDir)
+	if err := archive.Create(archiveDir, outPath); err != nil {
 		return err
 	}
-	logAndPrintf("Cleaning up temporary files in %s.\n", tempRoot)
-	if err := os.RemoveAll(tempRoot); err != nil {
+	common.LogAndPrintf("Cleaning up temporary files in %s.\n", archiveDir)
+	if err := os.RemoveAll(archiveDir); err != nil {
 		return err
 	}
-	logAndPrintf("Done.\n")
+	common.LogAndPrintf("Done.\n")
 	return nil
 }
 
@@ -177,13 +188,13 @@ func gatherInfo(client kube.ExtendedClient, config *config.BugReportConfig, reso
 		Client: client,
 		DryRun: config.DryRun,
 	}
-	logAndPrintf("\nFetching Istio control plane information from cluster.\n\n")
+	common.LogAndPrintf("\nFetching Istio control plane information from cluster.\n\n")
 	getFromCluster(content.GetK8sResources, params, clusterDir, &mandatoryWg)
 	getFromCluster(content.GetCRs, params, clusterDir, &mandatoryWg)
 	getFromCluster(content.GetEvents, params, clusterDir, &mandatoryWg)
 	getFromCluster(content.GetClusterInfo, params, clusterDir, &mandatoryWg)
 	getFromCluster(content.GetSecrets, params.SetVerbose(config.FullSecrets), clusterDir, &mandatoryWg)
-	getFromCluster(content.GetDescribePods, params.SetNamespace(config.IstioNamespace), clusterDir, &mandatoryWg)
+	getFromCluster(content.GetDescribePods, params.SetIstioNamespace(config.IstioNamespace), clusterDir, &mandatoryWg)
 
 	// optionalWg is subject to timer.
 	var optionalWg sync.WaitGroup
@@ -221,6 +232,9 @@ func gatherInfo(client kube.ExtendedClient, config *config.BugReportConfig, reso
 
 	// Wait for log fetches, up to the timeout.
 	<-cmdTimer.C
+
+	// Analyze runs many queries internally, so run these queries sequentially and after everything else has finished.
+	runAnalyze(config, resources, params)
 }
 
 // getFromCluster runs a cluster info fetching function f against the cluster and writes the results to fileName.
@@ -295,6 +309,22 @@ func getLog(client kube.ExtendedClient, resources *cluster2.Resources, config *c
 	return clog, cstat, cstat.Importance(), nil
 }
 
+func runAnalyze(config *config.BugReportConfig, resources *cluster2.Resources, params *content.Params) {
+	for ns := range resources.Root {
+		if isSystemNamespace[ns] {
+			continue
+		}
+		common.LogAndPrintf("Running istio analyze on namespace %s.\n", ns)
+		out, err := content.GetAnalyze(params.SetIstioNamespace(config.IstioNamespace))
+		if err != nil {
+			log.Error(err.Error())
+			continue
+		}
+		writeFiles(archive.AnalyzePath(tempDir, ns), out)
+	}
+	common.LogAndPrintf("\n")
+}
+
 func writeFiles(dir string, files map[string]string) {
 	for fname, text := range files {
 		writeFile(filepath.Join(dir, fname), text)
@@ -348,13 +378,6 @@ func BuildClientsFromConfig(kubeConfig []byte) (kube.Client, error) {
 		return nil, fmt.Errorf("failed to create kube clients: %v", err)
 	}
 	return clients, nil
-}
-
-func logAndPrintf(format string, a ...interface{}) {
-	fmt.Printf(format, a...)
-	o := []interface{}{format}
-	o = append(o, a...)
-	log.Infof(format, o)
 }
 
 func configLogs(opt *log.Options) error {

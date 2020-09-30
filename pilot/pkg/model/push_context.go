@@ -704,7 +704,6 @@ func (ps *PushContext) getSidecarScope(proxy *Proxy, workloadLabels labels.Colle
 	if sidecars, ok := ps.sidecarsByNamespace[proxy.ConfigNamespace]; ok {
 		// TODO: logic to merge multiple sidecar resources
 		// Currently we assume that there will be only one sidecar config for a namespace.
-		var defaultSidecar *SidecarScope
 		for _, wrapper := range sidecars {
 			if wrapper.Config != nil && wrapper.Config.Spec != nil {
 				sidecar := wrapper.Config.Spec.(*networking.Sidecar)
@@ -712,22 +711,19 @@ func (ps *PushContext) getSidecarScope(proxy *Proxy, workloadLabels labels.Colle
 				// if there is a workload selector, check for matching workload labels
 				if sidecar.GetWorkloadSelector() != nil {
 					workloadSelector := labels.Instance(sidecar.GetWorkloadSelector().GetLabels())
+					// exclude workload selector that not match
 					if !workloadLabels.IsSupersetOf(workloadSelector) {
 						continue
 					}
-					return wrapper
 				}
-				defaultSidecar = wrapper
-				continue
+
+				// it is guaranteed sidecars with selectors are put in front
+				// and the sidecars are sorted by creation timestamp,
+				// return exact/wildcard matching one directly
+				return wrapper
 			}
-			// Not sure when this can happen (Config = nil ?)
-			if defaultSidecar != nil {
-				return defaultSidecar // still return the valid one
-			}
+			// this happens at last, it is the default sidecar scope
 			return wrapper
-		}
-		if defaultSidecar != nil {
-			return defaultSidecar // still return the valid one
 		}
 	}
 
@@ -971,8 +967,11 @@ func (ps *PushContext) updateContext(
 			return err
 		}
 	} else {
+		// make sure we copy over things that would be generated in initServiceRegistry
 		ps.ServiceIndex = oldPushContext.ServiceIndex
 		ps.ServiceAccounts = oldPushContext.ServiceAccounts
+		// TODO should this be a deep copy, or is the old push context discarded?
+		ps.ClusterVIPs = oldPushContext.ClusterVIPs
 	}
 
 	if virtualServicesChanged {
@@ -1047,6 +1046,13 @@ func (ps *PushContext) initServiceRegistry(env *Environment) error {
 	// Sort the services in order of creation.
 	allServices := sortServicesByCreationTime(services)
 	for _, s := range allServices {
+		s.Mutex.RLock()
+		ps.ClusterVIPs[s] = make(map[string]string)
+		for k, v := range s.ClusterVIPs {
+			ps.ClusterVIPs[s][k] = v
+		}
+		s.Mutex.RUnlock()
+
 		ns := s.Attributes.Namespace
 		if len(s.Attributes.ExportTo) == 0 {
 			if ps.exportToDefaults.service[visibility.Private] {
@@ -1081,12 +1087,6 @@ func (ps *PushContext) initServiceRegistry(env *Environment) error {
 		}
 		ps.ServiceIndex.HostnameAndNamespace[s.Hostname][s.Attributes.Namespace] = s
 		ps.ServiceIndex.Hostname[s.Hostname] = s
-		s.Mutex.RLock()
-		ps.ClusterVIPs[s] = make(map[string]string)
-		for k, v := range s.ClusterVIPs {
-			ps.ClusterVIPs[s][k] = v
-		}
-		s.Mutex.RUnlock()
 		for _, port := range s.Ports {
 			if _, ok := ps.instancesByPort[s]; !ok {
 				ps.instancesByPort[s] = make(map[int][]*ServiceInstance)
