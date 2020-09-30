@@ -15,12 +15,12 @@ telemetry:
     enabled: true
     metadataExchange:
       # Indicates whether to enable WebAssembly runtime for metadata exchange filter.
-      wasmEnabled: true
+      wasmEnabled: false
     # Indicate if prometheus stats filter is enabled or not
     prometheus:
       enabled: true
       # Indicates whether to enable WebAssembly runtime for stats filter.
-      wasmEnabled: true
+      wasmEnabled: false
       # overrides stats EnvoyFilter configuration.
       configOverride:
         gateway: {}

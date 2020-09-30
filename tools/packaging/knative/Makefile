@@ -25,7 +25,7 @@ TAG ?= asm-cr
 # Hub for the proxy
 PROXY_HUB ?= grc.io/wlhe-cr
 
-$(ISTIO_OUT)/knative/telemetry-sd.yaml: manifests/charts/istio-control/istio-discovery/templates/telemetryv2_1.8.yaml
+$(ISTIO_OUT)/knative/telemetry-sd.yaml: manifests/charts/istio-control/istio-discovery/templates/telemetryv2_1.8.yaml tools/packaging/knative/values.telemetry-sd.yaml
 	mkdir -p $(ISTIO_OUT)/knative/templates
 	cp manifests/charts/istio-control/istio-discovery/templates/telemetryv2_1.8.yaml ${ISTIO_OUT}/knative/templates
 	cp manifests/charts/istio-control/istio-discovery/Chart.yaml ${ISTIO_OUT}/knative/Chart.yaml
