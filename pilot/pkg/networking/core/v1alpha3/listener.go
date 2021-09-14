@@ -183,6 +183,13 @@ func (configgen *ConfigGeneratorImpl) buildSidecarInboundListeners(
 			// redirected by remote services' kubeproxy to our specific endpoint IP.
 			port := *instance.ServicePort
 			port.Port = int(endpoint.EndpointPort)
+
+			if node.Metadata.UnprivilegedPod != "" && port.Port < 1024 {
+				log.Warnf("buildListeners: skipping privileged sidecar port %d for node %s as it is an unprivileged pod",
+					port.Port, node.ID)
+				continue
+			}
+
 			listenerOpts := buildListenerOpts{
 				push:       push,
 				proxy:      node,
