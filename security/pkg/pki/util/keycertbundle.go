@@ -93,22 +93,22 @@ func NewVerifiedKeyCertBundleFromFile(certFile string, privKeyFile string, certC
 	if err != nil {
 		return nil, err
 	}
+	var certChainBytes []byte
 	chaincerts, _ := SplitPemEncodedCertificates(certBytes)
-	intNames := []string{}
-	for _, r := range chaincerts {
-		intNames = append(intNames, r.Subject.String())
-	}
+   	// If the cert file is tls.key - it holds both leaf and intermediaries. Istio expects the leaf and intermediaries separated.
+	if len(chaincerts) > 1 {
+           leafBytes, rest := SplitTlsCrt(certBytes)
+	   certBytes = leafBytes
+           certChainBytes = rest
+        }
 
-	// If the cert file is tls.key - it holds both leaf and intermediaries.
-	leafBytes, certChainBytes := SplitTlsCrt(certBytes)
-	certBytes = leafBytes
-
+	
 	privKeyBytes, err := os.ReadFile(privKeyFile)
 	if err != nil {
 		return nil, err
 	}
 
-	// Standalone, separate certChainFiles
+	// Standalone, separate certChainFiles. Not used when tls.crt holds multiple certs, only for the old cacerts.
 	if len(certChainFiles) > 0 {
 		for _, f := range certChainFiles {
 			var b []byte

@@ -161,7 +161,7 @@ func NewSelfSignedIstioCAOptions(ctx context.Context,
 		// This seems wrong: with in-cluster Istiod the /etc/cacerts is checked first, and if found it is used.
 		// This code path is called either when /etc/cacerts is not found (so the secret doesn't exist) or if we run Istiod outside of the cluster.
 
-		// We should always check the cacerts first.
+		// TODO(costin): We should always check the cacerts first.
 
 		// 1. fetch `istio-ca-secret` in priority
 		err := loadCASecrets(client, namespace, caCertName, rootCertFile, caOpts)
@@ -344,7 +344,6 @@ func NewSelfSignedDebugIstioCAOptions(rootCertFile string, caCertTTL, defaultCer
 
 // NewPluggedCertIstioCAOptions returns a new IstioCAOptions instance using given certificate
 // from the file system. This is used only when "/etc/cacerts/" is mounted, using (in default install) cacerts secret.
-// It is simpler to just use the istio-ca-secret for all cases and k8s watching.
 func NewPluggedCertIstioCAOptions(fileBundle SigningCAFileBundle,
 	defaultCertTTL, maxCertTTL time.Duration, caRSAKeySize int,
 ) (caOpts *IstioCAOptions, err error) {

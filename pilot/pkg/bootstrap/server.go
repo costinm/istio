@@ -1025,7 +1025,7 @@ func getDNSNames(args *PilotArgs, host string) []string {
 // createPeerCertVerifier creates a SPIFFE certificate verifier with the current istiod configuration.
 func (s *Server) createPeerCertVerifier(tlsOptions TLSOptions, trustDomain string) (*spiffe.PeerCertVerifier, error) {
 	customTLSCertsExists, _, _, caCertPath := hasCustomTLSCerts(tlsOptions)
-	if !customTLSCertsExists && s.CA == nil && !s.isCADisabled() {
+	if !customTLSCertsExists && s.CA == nil && !s.isK8SSigning() {
 		// Running locally without configured certs - no TLS mode
 		return nil, nil
 	}
@@ -1176,7 +1176,7 @@ func (s *Server) maybeCreateCA(caOpts *caOptions) error {
 				return fmt.Errorf("failed to create RA: %v", err)
 			}
 		}
-		if !s.isCADisabled() {
+		if !s.isK8SSigning() {
 			if s.CA, err = s.createIstioCA(caOpts); err != nil {
 				return fmt.Errorf("failed to create CA: %v", err)
 			}
@@ -1185,9 +1185,11 @@ func (s *Server) maybeCreateCA(caOpts *caOptions) error {
 	return nil
 }
 
+// Returns true to indicate the K8S multicluster controller should enable replication of
+// root certificates to config maps in namespaces.
 func (s *Server) shouldStartNsController() bool {
-	if s.isCADisabled() {
-		// TODO(costin): Why ?
+	if s.isK8SSigning() {
+		// Need to distribute the roots from MeshConfig
 		return true
 	}
 	if s.CA == nil {
@@ -1195,8 +1197,7 @@ func (s *Server) shouldStartNsController() bool {
 	}
 
 	// For Kubernetes CA, we don't distribute it; it is mounted in all pods by Kubernetes.
-	// TODO(costin): isCADisabled returns true of RA is set and provider is k8s.
-	// Not clear what this means.
+	// This is never called - isK8SSigning is true.
 	if features.PilotCertProvider == constants.CertProviderKubernetes {
 		return false
 	}
@@ -1316,16 +1317,13 @@ func (s *Server) initWorkloadTrustBundle(args *PilotArgs) error {
 	return nil
 }
 
-// isCADisabled returns whether CA functionality is disabled in istiod.
-// That means istiod is not responsible for signing certs or distributing its roots.
-//
-// It returns true only if istiod certs is signed by Kubernetes or
-// workload certs are signed by external CA
-func (s *Server) isCADisabled() bool {
+// isK8SSigning returns whether K8S is used to sign certs instead of private keys known by Istiod
+func (s *Server) isK8SSigning() bool {
 	if s.RA == nil {
 		return false
 	}
 	// do not create CA server if PilotCertProvider is `kubernetes` and RA server exists
+	// TODO(costin): this is dead code
 	if features.PilotCertProvider == constants.CertProviderKubernetes {
 		return true
 	}
@@ -1333,8 +1331,6 @@ func (s *Server) isCADisabled() bool {
 	if strings.HasPrefix(features.PilotCertProvider, constants.CertProviderKubernetesSignerPrefix) {
 		return true
 	}
-
-	// TODO: if RA is set - but not using K8S - should this be trye ?
 	return false
 }
 

@@ -94,27 +94,6 @@ func (s *Server) initDNSCerts() error {
 			}()
 			return nil
 		})
-	} else if pilotCertProviderName == constants.CertProviderKubernetes {
-		// If PILOT_CERT_PROVIDER is "kubernentes" - will sign with the default ("") signer name and use ca.crt
-		// TODO(costin): remove this block, chiron will fail ("signer name is required")
-		log.Infof("Generating K8S-signed cert for %v using default K8S signer and ./var/run/secrets/kubernetes.io/serviceaccount/ca.crt", s.dnsNames)
-		certChain, keyPEM, _, err = chiron.GenKeyCertK8sCA(s.kubeClient.Kube(),
-			strings.Join(s.dnsNames, ","), defaultCACertPath, "", true, SelfSignedCACertTTL.Get())
-		if err != nil {
-			return fmt.Errorf("failed generating key and cert by kubernetes: %v", err)
-		}
-		caBundle, err = os.ReadFile(defaultCACertPath)
-		if err != nil {
-			return fmt.Errorf("failed reading %s: %v", defaultCACertPath, err)
-		}
-
-		s.addStartFunc("istiod server certificate rotation", func(stop <-chan struct{}) error {
-			go func() {
-				// Track TTL of DNS cert and renew cert in accordance to grace period.
-				s.RotateDNSCertForK8sCA(stop, defaultCACertPath, "", true, SelfSignedCACertTTL.Get())
-			}()
-			return nil
-		})
 	} else if pilotCertProviderName == constants.CertProviderIstiod {
 		// Generate certificates for Istiod DNS names, signed by Istiod CA or K8S.
 		certChain, keyPEM, err = s.CA.GenKeyCert(s.dnsNames, SelfSignedCACertTTL.Get(), false)
@@ -142,7 +121,6 @@ func (s *Server) initDNSCerts() error {
 			log.Infof("Use roots from istio-ca-secret")
 
 			caBundle = s.CA.GetCAKeyCertBundle().GetRootCertPem()
-			// Similar code to istio-ca-secret: refresh the root cert, but in casecrets
 			s.addStartFunc("istiod server certificate rotation", func(stop <-chan struct{}) error {
 				go func() {
 					// regenerate istiod key cert when root cert changes.

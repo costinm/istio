@@ -456,8 +456,6 @@ func (s *Server) createIstioCA(opts *caOptions) (*ca.IstioCA, error) {
 			// same way it handles the "istio-ca-secret" secret. Isitod utilizes a secret watch instead
 			// of file watch to check for secret updates. This may change in the future, and istiod
 			// will watch the file mount instead.
-
-			// TODO(costin): we can use the presence of intermediary certs to know if we can rotate.
 		}
 
 		// Either the secret is not mounted because it is named `istio-ca-secret`,
@@ -494,7 +492,7 @@ func (s *Server) loadCAFromSecrets(fileBundle *ca.SigningCAFileBundle, opts *caO
 	var caOpts *ca.IstioCAOptions
 	var err error
 	if s.kubeClient != nil {
-		log.Info("Use cluster secret  as the CA certificate")
+		log.Info("Use istio-ca-secrets  as the CA certificate")
 
 		// Abort after 20 minutes.
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute*20)
