@@ -97,7 +97,7 @@ func (rotator *SelfSignedCARootCertRotator) Run(stopCh chan struct{}) {
 			return
 		}
 	}
-	ticker := time.NewTicker(10 * time.Second) // .config.CheckInterval)
+	ticker := time.NewTicker(rotator.config.CheckInterval)
 	for {
 		select {
 		case <-ticker.C:

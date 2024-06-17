@@ -51,7 +51,8 @@ type caOptions struct {
 	TrustDomain    string
 	Namespace      string
 	Authenticators []security.Authenticator
-	// CertSignerDomain is based on CERT_SIGNER_DOMAIN
+	// CertSignerDomain is based on CERT_SIGNER_DOMAIN, combined with the user-supplied name
+        // to form the K8S signer for RA.
 	CertSignerDomain string
 }
 
@@ -129,7 +130,7 @@ var (
 		"Specify the RSA key size to use for self-signed Istio CA certificates.")
 
 	// TODO: Likely to be removed and added to mesh config
-	// deprecated - it is only used to enable k8s signing - use K8S_SIGNER instead.
+	// deprecated - it is only used to enable k8s signing - use presence of K8S_SIGNER instead.
 	externalCaType = env.Register("EXTERNAL_CA", "",
 		"External CA Integration Type. Permitted value is ISTIOD_RA_KUBERNETES_API.").Get()
 

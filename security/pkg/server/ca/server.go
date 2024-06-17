@@ -91,7 +91,6 @@ func (s *Server) CreateCertificate(ctx context.Context, request *pb.IstioCertifi
 	// By default, we will use the callers identity for the certificate
 	sans := caller.Identities
 	crMetadata := request.Metadata.GetFields()
-
 	impersonatedIdentity := crMetadata[security.ImpersonatedIdentity].GetStringValue()
 	if impersonatedIdentity != "" {
 		// This is used by ztunnel to create a cert for a pod on same node.
